@@ -10,7 +10,7 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["PORT", "HOST"]
+      "passThroughEnv": ["PORT", "HOST", "SEED"]
     }
   }
 }

@@ -3,11 +3,24 @@ import type { AddressInfo } from 'node:net';
 
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { buildPortfolio } from './market/portfolio.js';
-import { MarketSimulator, type RandomSource } from './market/simulator.js';
-import { CHANNELS, parseClientMessage, type ClientMessage, type ServerMessage } from './protocol.js';
+import { generateAccount } from './market/orders.js';
+import { buildAccountBalance, buildPortfolio } from './market/portfolio.js';
+import { randomSeed } from './market/random.js';
+import { MarketSimulator } from './market/simulator.js';
+import type { SimulationVolume } from './market/volume.js';
+import {
+  CHANNELS,
+  parseClientMessage,
+  type GetCandlesMessage,
+  type GetOrdersMessage,
+  type ServerMessage,
+  type SubscriptionMessage,
+} from './protocol.js';
 
 export const DEFAULT_TICK_INTERVAL_MS = 500;
+
+/** Início do relógio simulado, usado quando há seed para que as datas também se repitam. */
+export const SIMULATED_START_TIME = Date.parse('2026-01-05T16:00:00-03:00');
 
 const POSITIONS_EVERY_TICKS = 2;
 const MAX_MESSAGE_BYTES = 16 * 1024;
@@ -16,11 +29,14 @@ export interface GatewayOptions {
   port: number;
   host?: string;
   tickIntervalMs?: number;
-  random?: RandomSource;
+  /** Com seed, dados e timestamps se repetem. Sem seed, usa o relógio real. */
+  seed?: number;
+  volume?: Partial<SimulationVolume>;
 }
 
 export interface Gateway {
   readonly port: number;
+  readonly seed: number;
   close(): Promise<void>;
 }
 
@@ -29,15 +45,31 @@ interface Client {
   quote: Set<string>;
   book: Set<string>;
   positions: boolean;
+  account: boolean;
 }
 
 export async function startGateway({
   port,
   host,
   tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
-  random,
+  seed,
+  volume,
 }: GatewayOptions): Promise<Gateway> {
-  const simulator = new MarketSimulator(random);
+  const usesSimulatedClock = seed !== undefined;
+  const resolvedSeed = seed ?? randomSeed();
+  const startTime = usesSimulatedClock ? SIMULATED_START_TIME : Date.now();
+  let simulatedNow = startTime;
+  const now = (): number => (usesSimulatedClock ? simulatedNow : Date.now());
+
+  const simulator = new MarketSimulator({ seed: resolvedSeed, startTime, volume });
+  const account = generateAccount({
+    history: simulator.history,
+    symbols: simulator.symbols,
+    seed: resolvedSeed,
+    volume: simulator.volume,
+    startTime,
+  });
+  const lastCents = (symbol: string): number => simulator.lastCents(symbol);
   const knownSymbols = new Set(simulator.symbols);
   const clients = new Set<Client>();
 
@@ -54,40 +86,66 @@ export async function startGateway({
     sendFrame(client, JSON.stringify(message));
   }
 
-  function quoteMessage(symbol: string): ServerMessage {
-    return { type: 'quote', timestamp: Date.now(), data: simulator.quote(symbol) };
+  /** Serializa a mensagem uma única vez e só se houver quem a receba. */
+  function broadcast(wants: (client: Client) => boolean, build: () => ServerMessage): void {
+    let frame: string | undefined;
+    for (const client of clients) {
+      if (wants(client)) {
+        frame ??= JSON.stringify(build());
+        sendFrame(client, frame);
+      }
+    }
+  }
+
+  function quotesMessage(symbols: readonly string[]): ServerMessage {
+    return {
+      type: 'quotes',
+      timestamp: now(),
+      data: symbols.map((symbol) => simulator.quote(symbol)),
+    };
   }
 
   function bookMessage(symbol: string): ServerMessage {
-    return { type: 'book', timestamp: Date.now(), data: simulator.book(symbol) };
+    return { type: 'book', timestamp: now(), data: simulator.book(symbol) };
   }
 
   function positionsMessage(): ServerMessage {
     return {
       type: 'positions',
-      timestamp: Date.now(),
-      data: buildPortfolio((symbol) => simulator.lastCents(symbol)),
+      timestamp: now(),
+      data: buildPortfolio(account.holdings, lastCents),
     };
   }
 
-  function subscribe(client: Client, { channel, symbols }: ClientMessage): void {
-    if (channel === 'positions') {
-      client.positions = true;
+  function accountMessage(): ServerMessage {
+    return {
+      type: 'account',
+      timestamp: now(),
+      data: buildAccountBalance(account, lastCents),
+    };
+  }
+
+  function subscribe(client: Client, { channel, symbols }: SubscriptionMessage): void {
+    if (channel === 'positions' || channel === 'account') {
+      client[channel] = true;
       send(client, { type: 'subscribed', channel, symbols: [] });
-      send(client, positionsMessage());
+      send(client, channel === 'positions' ? positionsMessage() : accountMessage());
       return;
     }
 
     const requested = symbols ?? simulator.symbols;
-    const buildMessage = channel === 'quote' ? quoteMessage : bookMessage;
     requested.forEach((symbol) => client[channel].add(symbol));
     send(client, { type: 'subscribed', channel, symbols: requested });
-    requested.forEach((symbol) => send(client, buildMessage(symbol)));
+    if (channel === 'quote') {
+      send(client, quotesMessage(requested));
+    } else {
+      requested.forEach((symbol) => send(client, bookMessage(symbol)));
+    }
   }
 
-  function unsubscribe(client: Client, { channel, symbols }: ClientMessage): void {
-    if (channel === 'positions') {
-      client.positions = false;
+  function unsubscribe(client: Client, { channel, symbols }: SubscriptionMessage): void {
+    if (channel === 'positions' || channel === 'account') {
+      client[channel] = false;
       send(client, { type: 'unsubscribed', channel, symbols: [] });
       return;
     }
@@ -97,19 +155,60 @@ export async function startGateway({
     send(client, { type: 'unsubscribed', channel, symbols: requested });
   }
 
+  function respondCandles(
+    client: Client,
+    { requestId, symbol, limit, before }: GetCandlesMessage,
+  ): void {
+    send(client, {
+      type: 'candles',
+      requestId,
+      timestamp: now(),
+      data: { symbol, interval: '1m', candles: simulator.candles(symbol, limit, before) },
+    });
+  }
+
+  function respondOrders(client: Client, { requestId, ...query }: GetOrdersMessage): void {
+    send(client, {
+      type: 'orders',
+      requestId,
+      timestamp: now(),
+      data: account.ledger.query(query),
+    });
+  }
+
   function handleMessage(client: Client, raw: string): void {
     const result = parseClientMessage(raw, knownSymbols);
     if (!result.ok) {
-      send(client, { type: 'error', code: result.code, message: result.message });
-    } else if (result.message.type === 'subscribe') {
-      subscribe(client, result.message);
-    } else {
-      unsubscribe(client, result.message);
+      const { code, message, requestId } = result;
+      send(client, { type: 'error', code, message, requestId });
+      return;
+    }
+
+    const { message } = result;
+    switch (message.type) {
+      case 'subscribe':
+        subscribe(client, message);
+        break;
+      case 'unsubscribe':
+        unsubscribe(client, message);
+        break;
+      case 'getCandles':
+        respondCandles(client, message);
+        break;
+      case 'getOrders':
+        respondOrders(client, message);
+        break;
     }
   }
 
   server.on('connection', (socket) => {
-    const client: Client = { socket, quote: new Set(), book: new Set(), positions: false };
+    const client: Client = {
+      socket,
+      quote: new Set(),
+      book: new Set(),
+      positions: false,
+      account: false,
+    };
     clients.add(client);
 
     socket.on('message', (data, isBinary) => {
@@ -130,32 +229,43 @@ export async function startGateway({
     send(client, { type: 'welcome', channels: CHANNELS, symbols: simulator.symbols });
   });
 
+  /** Um frame por cliente e por ciclo: em lote, o navegador processa tudo em uma única tarefa. */
+  function publishQuotes(): void {
+    let fullFrame: string | undefined;
+    for (const client of clients) {
+      if (client.quote.size === simulator.symbols.length) {
+        fullFrame ??= JSON.stringify(quotesMessage(simulator.symbols));
+        sendFrame(client, fullFrame);
+      } else if (client.quote.size > 0) {
+        send(client, quotesMessage(simulator.symbols.filter((symbol) => client.quote.has(symbol))));
+      }
+    }
+  }
+
+  function publishBooks(): void {
+    for (const symbol of simulator.symbols) {
+      broadcast(
+        (client) => client.book.has(symbol),
+        () => bookMessage(symbol),
+      );
+    }
+  }
+
   let tickCount = 0;
 
   function publishCycle(): void {
-    simulator.tick();
+    if (usesSimulatedClock) {
+      simulatedNow += tickIntervalMs;
+    }
+    simulator.tick(now());
     tickCount++;
 
-    for (const symbol of simulator.symbols) {
-      const quoteFrame = JSON.stringify(quoteMessage(symbol));
-      const bookFrame = JSON.stringify(bookMessage(symbol));
-      for (const client of clients) {
-        if (client.quote.has(symbol)) {
-          sendFrame(client, quoteFrame);
-        }
-        if (client.book.has(symbol)) {
-          sendFrame(client, bookFrame);
-        }
-      }
-    }
+    publishQuotes();
+    publishBooks();
 
     if (tickCount % POSITIONS_EVERY_TICKS === 0) {
-      const positionsFrame = JSON.stringify(positionsMessage());
-      for (const client of clients) {
-        if (client.positions) {
-          sendFrame(client, positionsFrame);
-        }
-      }
+      broadcast((client) => client.positions, positionsMessage);
+      broadcast((client) => client.account, accountMessage);
     }
   }
 
@@ -163,6 +273,7 @@ export async function startGateway({
 
   return {
     port: (server.address() as AddressInfo).port,
+    seed: resolvedSeed,
     close() {
       clearInterval(timer);
       for (const { socket } of clients) {

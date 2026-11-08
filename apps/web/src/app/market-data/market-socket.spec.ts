@@ -65,6 +65,32 @@ describe('MarketSocket', () => {
     });
   });
 
+  describe('tipos de mensagem', () => {
+    it.each<ServerMessage>([
+      { type: 'quotes', timestamp: 1, data: [] },
+      {
+        type: 'account',
+        timestamp: 1,
+        data: { accountId: 'SIM-0001', availableBalance: 1, blockedBalance: 2, totalEquity: 3 },
+      },
+      {
+        type: 'candles',
+        requestId: 'a',
+        timestamp: 1,
+        data: { symbol: 'PETR4', interval: '1m', candles: [] },
+      },
+      { type: 'orders', requestId: 'b', timestamp: 1, data: { items: [], total: 0, offset: 0, limit: 100 } },
+    ])('aceita mensagens $type', (message) => {
+      const received: ServerMessage[] = [];
+      socket.messages.subscribe((value) => received.push(value));
+      const current = connectAndWelcome();
+
+      current.receive(message);
+
+      expect(received).toEqual([WELCOME, message]);
+    });
+  });
+
   describe('frames inválidos', () => {
     it.each([
       ['JSON malformado', 'isto não é json'],

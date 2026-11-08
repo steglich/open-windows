@@ -32,7 +32,7 @@ Toda mensagem nos dois sentidos MUST ser um objeto JSON em um frame de texto, co
 - **THEN** o conteúdo é um objeto JSON válido com o campo `type`
 
 ### Requirement: Mensagem de boas-vindas
-Ao aceitar uma conexão, o servidor SHALL enviar uma mensagem `welcome` com os campos `channels`, contendo `quote`, `book` e `positions`, e `symbols`, contendo os ativos disponíveis.
+Ao aceitar uma conexão, o servidor SHALL enviar uma mensagem `welcome` com os campos `channels`, contendo `quote`, `book`, `positions` e `account`, e `symbols`, contendo os ativos disponíveis.
 
 #### Scenario: Nova conexão
 - **WHEN** um cliente se conecta
@@ -43,36 +43,36 @@ O servidor MUST enviar a um cliente dados de um canal somente depois que esse cl
 
 #### Scenario: Cliente sem assinaturas
 - **WHEN** um cliente permanece conectado sem assinar nenhum canal
-- **THEN** ele não recebe mensagens `quote`, `book` ou `positions`
+- **THEN** ele não recebe mensagens `quotes`, `book`, `positions` ou `account`
 
 ### Requirement: Assinatura de canais
-O servidor SHALL aceitar mensagens `{"type":"subscribe","channel":<canal>,"symbols":[...]}`. Nos canais `quote` e `book`, a ausência de `symbols` MUST assinar todos os ativos, e assinaturas sucessivas MUST se acumular. No canal `positions`, `symbols` MUST ser ignorado.
+O servidor SHALL aceitar mensagens `{"type":"subscribe","channel":<canal>,"symbols":[...]}`. Nos canais `quote` e `book`, a ausência de `symbols` MUST assinar todos os ativos, e assinaturas sucessivas MUST se acumular. Nos canais `positions` e `account`, `symbols` MUST ser ignorado.
 
 #### Scenario: Assinatura de ativos específicos
-- **WHEN** um cliente assina o canal `quote` com `symbols` igual a `["ALFA3"]`
-- **THEN** ele recebe uma mensagem `subscribed` com `channel` e `symbols` e passa a receber mensagens `quote` apenas de `ALFA3`
+- **WHEN** um cliente assina o canal `quote` com `symbols` igual a `["PETR4"]`
+- **THEN** ele recebe uma mensagem `subscribed` com `channel` e `symbols` e passa a receber nas mensagens `quotes` apenas `PETR4`
 
 #### Scenario: Assinatura de todos os ativos
 - **WHEN** um cliente assina o canal `book` sem informar `symbols`
 - **THEN** ele passa a receber mensagens `book` de todos os ativos disponíveis
 
 #### Scenario: Assinaturas acumuladas
-- **WHEN** um cliente assina o canal `quote` para `ALFA3` e depois para `BETA4`
-- **THEN** ele passa a receber mensagens `quote` dos dois ativos
+- **WHEN** um cliente assina o canal `quote` para `PETR4` e depois para `VALE3`
+- **THEN** ele passa a receber nas mensagens `quotes` os dois ativos
 
 ### Requirement: Estado inicial na assinatura
-Logo após confirmar uma assinatura, o servidor SHALL enviar o estado atual de cada item assinado, sem esperar o próximo ciclo de publicação.
+Logo após confirmar uma assinatura, o servidor SHALL enviar o estado atual de cada item assinado, sem esperar o próximo ciclo de publicação. No canal `quote`, MUST enviar uma única mensagem `quotes` com todos os ativos da assinatura.
 
 #### Scenario: Primeira cotação imediata
-- **WHEN** um cliente assina o canal `quote` para `ALFA3`
-- **THEN** a mensagem seguinte à confirmação `subscribed` é a cotação atual de `ALFA3`
+- **WHEN** um cliente assina o canal `quote` para `PETR4`
+- **THEN** a mensagem seguinte à confirmação `subscribed` é uma mensagem `quotes` com a cotação atual de `PETR4`
 
 ### Requirement: Cancelamento de assinatura
 O servidor SHALL aceitar mensagens `{"type":"unsubscribe","channel":<canal>,"symbols":[...]}`, confirmar com uma mensagem `unsubscribed` e parar de enviar os itens cancelados. A ausência de `symbols` MUST cancelar todo o canal.
 
 #### Scenario: Cancelar um ativo
-- **WHEN** um cliente assinado em `ALFA3` e `BETA4` cancela a assinatura de `ALFA3`
-- **THEN** ele recebe `unsubscribed` e continua recebendo apenas mensagens de `BETA4`
+- **WHEN** um cliente assinado em `PETR4` e `VALE3` cancela a assinatura de `PETR4`
+- **THEN** ele recebe `unsubscribed` e continua recebendo apenas dados de `VALE3`
 
 #### Scenario: Cancelar o canal inteiro
 - **WHEN** um cliente cancela o canal `positions`
@@ -99,3 +99,21 @@ As assinaturas SHALL ser independentes por conexão, e o encerramento de uma con
 #### Scenario: Cliente desconecta
 - **WHEN** dois clientes estão assinados no mesmo canal e um deles desconecta
 - **THEN** o outro continua recebendo mensagens normalmente
+
+### Requirement: Requisições com correlação
+O servidor SHALL aceitar as mensagens `getCandles` e `getOrders`, que MUST ter `requestId` do tipo string e não vazio, e MUST devolver esse valor na resposta correspondente, inclusive em mensagens `error`.
+
+#### Scenario: Resposta correlacionada
+- **WHEN** um cliente envia `getOrders` com `requestId` igual a `abc`
+- **THEN** a resposta tem `requestId` igual a `abc`
+
+#### Scenario: Requisição sem identificador
+- **WHEN** um cliente envia `getOrders` sem `requestId`
+- **THEN** ele recebe `error` com `code` igual a `INVALID_MESSAGE` e continua conectado
+
+### Requirement: Envio de ordens indisponível
+O servidor MUST tratar qualquer mensagem de envio de ordem como `type` desconhecido, pois a simulação não aceita entrada de ordens.
+
+#### Scenario: Tentativa de enviar ordem
+- **WHEN** um cliente envia uma mensagem com `type` igual a `placeOrder`
+- **THEN** ele recebe `error` com `code` igual a `INVALID_MESSAGE` e nenhum dado da conta muda

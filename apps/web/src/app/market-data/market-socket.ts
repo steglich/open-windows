@@ -21,9 +21,12 @@ const SERVER_MESSAGE_TYPES: ReadonlySet<unknown> = new Set<ServerMessage['type']
   'subscribed',
   'unsubscribed',
   'error',
-  'quote',
+  'quotes',
   'book',
   'positions',
+  'account',
+  'candles',
+  'orders',
 ]);
 
 function parseServerMessage(frame: unknown): ServerMessage | null {

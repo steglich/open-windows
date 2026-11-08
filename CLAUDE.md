@@ -22,7 +22,7 @@ pnpm turbo run dev --filter=server                # Run a task in one project (s
 pnpm --filter server exec vitest run src/gateway.test.ts   # Run a single server test file
 ```
 
-The server reads `PORT` (default `8090`) and `HOST` (default `127.0.0.1`). `turbo.json` passes them through to `dev` only, so a new environment variable must be added there or Turborepo filters it out.
+The server reads `PORT` (default `8090`), `HOST` (default `127.0.0.1`), and `SEED` (an integer from `0` to `4294967295`; unset means a random seed and the real clock). `turbo.json` passes them through to `dev` only, so a new environment variable must be added there or Turborepo filters it out.
 
 Inside WSL, the `ng` on `PATH` may be the Windows binary. Use the project's CLI instead, for example `pnpm --filter web exec ng generate ...`.
 
@@ -30,11 +30,14 @@ TypeScript is pinned to `~6.0.3` in both apps because Angular 22.2 requires `>=6
 
 ## Server architecture
 
-The protocol contract (message shapes, channels, error codes) is specified in the OpenSpec specs and typed in `apps/server/src/protocol.ts`.
+The protocol contract (message shapes, channels, error codes) is specified in the OpenSpec specs, typed in `apps/server/src/protocol.ts`, and documented field by field in `apps/server/PROTOCOL.md`.
 
-- A single `MarketSimulator` holds all market state, and `gateway.ts` advances it in one 500 ms cycle. Each cycle publishes quote before book per symbol, and positions every second cycle. Quote, book, and positions are consistent only because they share this state and order, so do not add per-channel timers.
+- A single `MarketSimulator` holds all market state, and `gateway.ts` advances it in one 500 ms cycle. Each cycle publishes one `quotes` batch per client, then the books, and every second cycle positions then account. Quotes, book, positions, and account are consistent only because they share this state and order, so do not add per-channel timers.
+- Candles and orders are answered on request (`getCandles`, `getOrders`) and correlated by `requestId`. Everything else that changes on its own is a channel.
+- The quote state is derived from the current session's candles in `market/history.ts`, and positions are replayed from the fills generated in `market/orders.ts`. Keep those derivations: they are what make the sections agree with each other.
+- Reproducibility depends on RNG consumption not varying with subscriptions. `tick` draws a fixed amount per asset, and book levels come from a per-asset, per-cycle sub-seed (`deriveSeed`) computed on demand.
 - Prices are integer cents internally and are converted to reais only when building messages (`centsToReais`). Keep arithmetic in cents.
-- `startGateway` takes the port, cycle interval, and random source as options. Tests use port `0`, short cycles, a seeded random source, and real WebSocket clients (`TestClient` in `src/test-utils.ts`).
+- `startGateway` takes the port, cycle interval, seed, and volume as options. With a seed, all timestamps come from a simulated clock. Tests use port `0`, short cycles, a seed, a reduced `volume`, and real WebSocket clients (`TestClient` in `src/test-utils.ts`).
 - `tsconfig.json` excludes `*.test.ts` and `test-utils.ts`, so `pnpm build` does not type-check tests.
 
 ## Web architecture

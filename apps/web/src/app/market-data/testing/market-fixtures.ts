@@ -21,7 +21,7 @@ export function textOf(element: Element): string {
 }
 
 export function welcome(symbols: readonly string[] = SYMBOLS): ServerMessage {
-  return { type: 'welcome', channels: ['quote', 'book', 'positions'], symbols };
+  return { type: 'welcome', channels: ['quote', 'book', 'positions', 'account'], symbols };
 }
 
 export function quote(symbol: string, overrides: Partial<Quote> = {}): Quote {
@@ -37,17 +37,24 @@ export function quote(symbol: string, overrides: Partial<Quote> = {}): Quote {
     change: 0.5,
     changePercent: 1.56,
     volume: 1_500_000,
+    financialVolume: 48_750_000,
+    updatedAt: 1,
     ...overrides,
   };
 }
 
 export function quoteMessage(symbol: string, overrides: Partial<Quote> = {}): ServerMessage {
-  return { type: 'quote', timestamp: 1, data: quote(symbol, overrides) };
+  return { type: 'quotes', timestamp: 1, data: [quote(symbol, overrides)] };
+}
+
+export function quotesMessage(quotes: Quote[]): ServerMessage {
+  return { type: 'quotes', timestamp: 1, data: quotes };
 }
 
 export function book(symbol: string, overrides: Partial<OrderBook> = {}): OrderBook {
   return {
     symbol,
+    spread: 0.02,
     bids: [
       { price: 32.49, quantity: 100, orders: 1 },
       { price: 32.48, quantity: 200, orders: 2 },
@@ -69,10 +76,12 @@ export function portfolio(overrides: Partial<Portfolio> = {}): Portfolio {
     accountId: 'SIM-0001',
     totalMarketValue: 1234.5,
     totalUnrealizedPnl: 100,
+    totalUnrealizedPnlPercent: 8.82,
     positions: [
       {
         symbol: 'ALFA3',
         quantity: 1000,
+        blockedQuantity: 0,
         averagePrice: 31.8,
         lastPrice: 32.5,
         marketValue: 32_500,
@@ -82,6 +91,7 @@ export function portfolio(overrides: Partial<Portfolio> = {}): Portfolio {
       {
         symbol: 'OMEG3',
         quantity: 5000,
+        blockedQuantity: 100,
         averagePrice: 12.95,
         lastPrice: 12.4,
         marketValue: 62_000,

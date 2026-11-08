@@ -9,6 +9,7 @@ import {
   positionsMessage,
   quote,
   quoteMessage,
+  quotesMessage,
   startConnected,
   welcome,
 } from './testing/market-fixtures';
@@ -52,6 +53,21 @@ describe('MarketStore', () => {
       socket.receive(quoteMessage('ALFA3', { last: 40 }));
 
       expect(store.quoteRows()).toEqual([quote('ALFA3', { last: 40 }), quote('BETA4')]);
+    });
+
+    it('aplica o lote inteiro e mantém os ativos ausentes dele', () => {
+      const socket = startConnected(store);
+      socket.receive(quoteMessage('GAMA3', { last: 7 }));
+
+      socket.receive(
+        quotesMessage([quote('ALFA3', { last: 40 }), quote('BETA4', { last: 41 })]),
+      );
+
+      expect(store.quoteRows()).toEqual([
+        quote('ALFA3', { last: 40 }),
+        quote('BETA4', { last: 41 }),
+        quote('GAMA3', { last: 7 }),
+      ]);
     });
 
     it('mantém todas as cotações de uma rajada', () => {

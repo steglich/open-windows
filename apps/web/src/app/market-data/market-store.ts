@@ -74,8 +74,8 @@ export class MarketStore {
       case 'error':
         this.lastErrorState.set({ code: message.code, message: message.message });
         break;
-      case 'quote':
-        this.quotes.update((quotes) => ({ ...quotes, [message.data.symbol]: message.data }));
+      case 'quotes':
+        this.applyQuotes(message.data);
         break;
       case 'book':
         if (message.data.symbol === this.selectedSymbolState()) {
@@ -85,7 +85,23 @@ export class MarketStore {
       case 'positions':
         this.portfolioState.set(message.data);
         break;
+      case 'account':
+      case 'candles':
+      case 'orders':
+        // Ainda não exibidos na tela.
+        break;
     }
+  }
+
+  /** Aplica o lote em uma única atualização, já que ele pode trazer centenas de ativos. */
+  private applyQuotes(batch: readonly Quote[]): void {
+    this.quotes.update((quotes) => {
+      const updated = { ...quotes };
+      for (const quote of batch) {
+        updated[quote.symbol] = quote;
+      }
+      return updated;
+    });
   }
 
   /** Assinaturas valem por conexão, então cada `welcome` as refaz. */

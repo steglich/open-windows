@@ -1,21 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import { seededRandom } from '../test-utils.js';
-import { buildPortfolio } from './portfolio.js';
-import { MarketSimulator } from './simulator.js';
+import { OrderLedger, type GeneratedAccount, type Holding } from './orders.js';
+import { buildAccountBalance, buildPortfolio } from './portfolio.js';
+
+const HOLDINGS: Holding[] = [
+  { symbol: 'PETR4', quantity: 1000, blockedQuantity: 200, averagePrice: 3180 },
+  { symbol: 'VALE3', quantity: 200, blockedQuantity: 0, averagePrice: 10850 },
+  { symbol: 'ITUB4', quantity: 5000, blockedQuantity: 100, averagePrice: 1295 },
+];
+
+const account: GeneratedAccount = {
+  ledger: new OrderLedger([]),
+  holdings: HOLDINGS,
+  availableCents: 10_000_00,
+  blockedCents: 2_500_50,
+};
 
 describe('buildPortfolio', () => {
-  it('tem ao menos três posições de ativos do catálogo', () => {
-    const simulator = new MarketSimulator(seededRandom(3));
-    const { positions } = buildPortfolio((symbol) => simulator.lastCents(symbol));
-    expect(positions.length).toBeGreaterThanOrEqual(3);
-    for (const { symbol } of positions) {
-      expect(simulator.symbols).toContain(symbol);
-    }
-  });
-
   it('calcula valores e totais a partir do preço em centavos', () => {
-    const { positions, totalMarketValue, totalUnrealizedPnl } = buildPortfolio(() => 3333);
+    const portfolio = buildPortfolio(HOLDINGS, () => 3333);
+    const { positions, totalMarketValue, totalUnrealizedPnl, totalUnrealizedPnlPercent } = portfolio;
 
     for (const position of positions) {
       const { quantity, averagePrice, marketValue, unrealizedPnl, unrealizedPnlPercent } = position;
@@ -33,20 +37,53 @@ describe('buildPortfolio', () => {
       positions.reduce((sum, { unrealizedPnl }) => sum + unrealizedPnl, 0),
       2,
     );
+
+    const cost = positions.reduce(
+      (sum, { quantity, averagePrice }) => sum + quantity * averagePrice,
+      0,
+    );
+    expect(totalUnrealizedPnlPercent).toBeCloseTo((totalUnrealizedPnl / cost) * 100, 2);
   });
 
-  it('usa o último preço das cotações e mantém quantidades fixas', () => {
-    const simulator = new MarketSimulator(seededRandom(5));
-    const initial = buildPortfolio((symbol) => simulator.lastCents(symbol)).positions;
+  it('informa a quantidade bloqueada e preserva a ordem', () => {
+    const { positions } = buildPortfolio(HOLDINGS, () => 1000);
+    expect(positions.map(({ symbol, blockedQuantity }) => [symbol, blockedQuantity])).toEqual([
+      ['PETR4', 200],
+      ['VALE3', 0],
+      ['ITUB4', 100],
+    ]);
+  });
+});
 
-    for (let cycle = 0; cycle < 500; cycle++) {
-      simulator.tick();
-      const { positions } = buildPortfolio((symbol) => simulator.lastCents(symbol));
-      positions.forEach((position, index) => {
-        expect(position.lastPrice).toBe(simulator.quote(position.symbol).last);
-        expect(position.quantity).toBe(initial[index]!.quantity);
-        expect(position.averagePrice).toBe(initial[index]!.averagePrice);
-      });
-    }
+describe('buildAccountBalance', () => {
+  it('converte os saldos para reais', () => {
+    const balance = buildAccountBalance(account, () => 1000);
+    expect(balance.availableBalance).toBe(10_000);
+    expect(balance.blockedBalance).toBe(2_500.5);
+  });
+
+  it('soma os saldos ao valor de mercado da carteira', () => {
+    const lastCents = (symbol: string) => (symbol === 'PETR4' ? 3333 : 1234);
+    const balance = buildAccountBalance(account, lastCents);
+    const { totalMarketValue } = buildPortfolio(HOLDINGS, lastCents);
+
+    expect(balance.totalEquity).toBeCloseTo(
+      balance.availableBalance + balance.blockedBalance + totalMarketValue,
+      2,
+    );
+  });
+
+  it('usa o mesmo accountId da carteira', () => {
+    expect(buildAccountBalance(account, () => 1000).accountId).toBe(
+      buildPortfolio(HOLDINGS, () => 1000).accountId,
+    );
+  });
+
+  it('mantém os saldos constantes quando o preço muda', () => {
+    const before = buildAccountBalance(account, () => 1000);
+    const after = buildAccountBalance(account, () => 2000);
+    expect(after.availableBalance).toBe(before.availableBalance);
+    expect(after.blockedBalance).toBe(before.blockedBalance);
+    expect(after.totalEquity).toBeGreaterThan(before.totalEquity);
   });
 });

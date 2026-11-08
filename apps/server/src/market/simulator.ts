@@ -1,22 +1,24 @@
-import type { BookLevel, OrderBook, Quote } from '../protocol.js';
+import type { BookLevel, Candle, OrderBook, Quote } from '../protocol.js';
+import {
+  floorToMinute,
+  LOT_SIZE,
+  priceFloor,
+  priceStep,
+  PriceHistory,
+  type CandleCents,
+} from './history.js';
+import { deriveSeed, randomInt, seededRandom, type RandomSource } from './random.js';
+import { TICKERS } from './tickers.js';
+import { resolveVolume, type SimulationVolume } from './volume.js';
 
-export type RandomSource = () => number;
-
-const INSTRUMENTS = [
-  { symbol: 'ALFA3', previousClose: 3250 },
-  { symbol: 'BETA4', previousClose: 1875 },
-  { symbol: 'GAMA3', previousClose: 8420 },
-  { symbol: 'DELT11', previousClose: 11290 },
-  { symbol: 'OMEG3', previousClose: 1240 },
-  { symbol: 'SIGM4', previousClose: 4575 },
-] as const;
-
-const BOOK_DEPTH = 5;
-const LOT_SIZE = 100;
-const MAX_OPENING_GAP = 0.01;
 const MAX_STEP = 0.005;
+const MAX_LEVEL_GAP = 3;
+const MAX_BOOK_LOTS = 50;
+const MAX_SPREAD_HALF = 3;
+/** Divide os lotes de um minuto de negociação em ciclos. */
+const TICK_LIQUIDITY_DIVISOR = 10;
 
-/** Todos os preços do estado são inteiros em centavos. */
+/** Todos os preços e valores financeiros do estado são inteiros em centavos. */
 interface MarketState {
   symbol: string;
   previousClose: number;
@@ -26,8 +28,14 @@ interface MarketState {
   high: number;
   low: number;
   volume: number;
-  bids: BookLevel[];
-  asks: BookLevel[];
+  financialVolume: number;
+  bestBid: number;
+  bestAsk: number;
+  updatedAt: number;
+  maxTickLots: number;
+  candles: CandleCents[];
+  book?: OrderBook;
+  bookCycle: number;
 }
 
 export function centsToReais(cents: number): number {
@@ -38,38 +46,89 @@ export function percentChange(delta: number, base: number): number {
   return Math.round((delta / base) * 10_000) / 100;
 }
 
+export function toCandle(candle: CandleCents): Candle {
+  return {
+    ...candle,
+    open: centsToReais(candle.open),
+    high: centsToReais(candle.high),
+    low: centsToReais(candle.low),
+    close: centsToReais(candle.close),
+    financialVolume: centsToReais(candle.financialVolume),
+  };
+}
+
+export interface MarketSimulatorOptions {
+  seed: number;
+  startTime: number;
+  volume?: Partial<SimulationVolume>;
+}
+
 export class MarketSimulator {
-  readonly symbols: readonly string[] = INSTRUMENTS.map(({ symbol }) => symbol);
+  readonly symbols: readonly string[];
+  readonly volume: SimulationVolume;
+  readonly history: PriceHistory;
 
+  private readonly seed: number;
+  private readonly random: RandomSource;
   private readonly states = new Map<string, MarketState>();
+  private cycle = 0;
 
-  constructor(private readonly random: RandomSource = Math.random) {
-    for (const { symbol, previousClose } of INSTRUMENTS) {
-      const open = previousClose + this.step(previousClose, MAX_OPENING_GAP);
+  constructor({ seed, startTime, volume }: MarketSimulatorOptions) {
+    this.seed = seed;
+    this.volume = resolveVolume(volume);
+    this.symbols = TICKERS.slice(0, this.volume.assets);
+    this.history = new PriceHistory({
+      seed,
+      symbols: this.symbols,
+      volume: this.volume,
+      startTime,
+    });
+    this.random = seededRandom(deriveSeed(seed, 'tick'));
+
+    for (const symbol of this.symbols) {
+      const candles = this.history.currentCandles(symbol);
+      const open = candles[0]!.open;
+      const last = candles.at(-1)!.close;
       const state: MarketState = {
         symbol,
-        previousClose,
+        previousClose: this.history.previousClose(symbol),
         open,
-        floor: Math.ceil(open / 2),
-        last: open,
-        high: open,
-        low: open,
-        volume: 0,
-        bids: [],
-        asks: [],
+        floor: priceFloor(open),
+        last,
+        high: Math.max(...candles.map(({ high }) => high)),
+        low: Math.min(...candles.map(({ low }) => low)),
+        volume: candles.reduce((sum, { volume: quantity }) => sum + quantity, 0),
+        financialVolume: candles.reduce((sum, candle) => sum + candle.financialVolume, 0),
+        bestBid: 0,
+        bestAsk: 0,
+        updatedAt: startTime,
+        maxTickLots: Math.ceil(this.history.liquidity(symbol) / TICK_LIQUIDITY_DIVISOR),
+        candles,
+        bookCycle: -1,
       };
-      this.refreshBook(state);
+      this.refreshBestOffers(state);
       this.states.set(symbol, state);
     }
   }
 
-  tick(): void {
+  /** Consome sempre a mesma quantidade de números por ativo, para que a seed reproduza os dados. */
+  tick(now: number): void {
+    this.cycle++;
+    const minute = floorToMinute(now);
+
     for (const state of this.states.values()) {
-      state.last = Math.max(state.floor, state.last + this.step(state.last, MAX_STEP));
+      state.last = Math.max(state.floor, state.last + priceStep(this.random, state.last, MAX_STEP));
       state.high = Math.max(state.high, state.last);
       state.low = Math.min(state.low, state.last);
-      state.volume += LOT_SIZE * this.randomInt(1, 50);
-      this.refreshBook(state);
+      state.updatedAt = now;
+
+      const quantity = LOT_SIZE * randomInt(this.random, 1, state.maxTickLots);
+      const financial = quantity * state.last;
+      state.volume += quantity;
+      state.financialVolume += financial;
+
+      this.updateCandle(state, minute, quantity, financial);
+      this.refreshBestOffers(state);
     }
   }
 
@@ -79,8 +138,8 @@ export class MarketSimulator {
     return {
       symbol,
       last: centsToReais(state.last),
-      bid: centsToReais(state.bids[0]!.price),
-      ask: centsToReais(state.asks[0]!.price),
+      bid: centsToReais(state.bestBid),
+      ask: centsToReais(state.bestAsk),
       open: centsToReais(state.open),
       high: centsToReais(state.high),
       low: centsToReais(state.low),
@@ -88,16 +147,23 @@ export class MarketSimulator {
       change: centsToReais(delta),
       changePercent: percentChange(delta, state.previousClose),
       volume: state.volume,
+      financialVolume: centsToReais(state.financialVolume),
+      updatedAt: state.updatedAt,
     };
   }
 
+  /** Calculado sob demanda e mantido durante o ciclo, sem criar 50 mil objetos por ciclo à toa. */
   book(symbol: string): OrderBook {
-    const { bids, asks } = this.state(symbol);
-    const toReais = (level: BookLevel): BookLevel => ({
-      ...level,
-      price: centsToReais(level.price),
-    });
-    return { symbol, bids: bids.map(toReais), asks: asks.map(toReais) };
+    const state = this.state(symbol);
+    if (state.bookCycle !== this.cycle) {
+      state.book = this.buildBook(state);
+      state.bookCycle = this.cycle;
+    }
+    return state.book!;
+  }
+
+  candles(symbol: string, limit: number, before?: number): Candle[] {
+    return this.history.query(symbol, limit, before).map(toCandle);
   }
 
   lastCents(symbol: string): number {
@@ -112,30 +178,59 @@ export class MarketSimulator {
     return state;
   }
 
-  private step(price: number, maxRatio: number): number {
-    return Math.round((2 * this.random() - 1) * Math.floor(price * maxRatio));
+  private updateCandle(
+    state: MarketState,
+    minute: number,
+    quantity: number,
+    financial: number,
+  ): void {
+    let candle = state.candles.at(-1)!;
+    if (candle.time < minute) {
+      candle = {
+        time: minute,
+        open: state.last,
+        high: state.last,
+        low: state.last,
+        close: state.last,
+        volume: 0,
+        financialVolume: 0,
+      };
+      state.candles.push(candle);
+    }
+    candle.close = state.last;
+    candle.high = Math.max(candle.high, state.last);
+    candle.low = Math.min(candle.low, state.last);
+    candle.volume += quantity;
+    candle.financialVolume += financial;
   }
 
-  private refreshBook(state: MarketState): void {
-    state.bids = this.buildSide(state.last - this.randomInt(1, 3), -1);
-    state.asks = this.buildSide(state.last + this.randomInt(1, 3), 1);
+  private refreshBestOffers(state: MarketState): void {
+    state.bestBid = state.last - randomInt(this.random, 1, MAX_SPREAD_HALF);
+    state.bestAsk = state.last + randomInt(this.random, 1, MAX_SPREAD_HALF);
   }
 
-  private buildSide(bestPrice: number, direction: 1 | -1): BookLevel[] {
+  private buildBook(state: MarketState): OrderBook {
+    const random = seededRandom(deriveSeed(this.seed, `book:${state.symbol}:${this.cycle}`));
+    return {
+      symbol: state.symbol,
+      spread: centsToReais(state.bestAsk - state.bestBid),
+      bids: this.buildSide(random, state.bestBid, -1),
+      asks: this.buildSide(random, state.bestAsk, 1),
+    };
+  }
+
+  private buildSide(random: RandomSource, bestPrice: number, direction: 1 | -1): BookLevel[] {
     const levels: BookLevel[] = [];
     let price = bestPrice;
-    for (let depth = 0; depth < BOOK_DEPTH; depth++) {
+    for (let depth = 0; depth < this.volume.bookDepth; depth++) {
+      const lots = randomInt(random, 1, MAX_BOOK_LOTS);
       levels.push({
-        price,
-        quantity: LOT_SIZE * this.randomInt(1, 50),
-        orders: this.randomInt(1, 20),
+        price: centsToReais(price),
+        quantity: LOT_SIZE * lots,
+        orders: randomInt(random, 1, lots),
       });
-      price += direction * this.randomInt(1, 5);
+      price += direction * randomInt(random, 1, MAX_LEVEL_GAP);
     }
     return levels;
-  }
-
-  private randomInt(min: number, max: number): number {
-    return min + Math.floor(this.random() * (max - min + 1));
   }
 }
