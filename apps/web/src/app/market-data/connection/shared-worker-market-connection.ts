@@ -17,6 +17,7 @@ export class SharedWorkerMarketConnection implements MarketConnection {
   readonly messages: Observable<ServerMessage> = this.messagesSubject.asObservable();
 
   private port: MessagePort | undefined;
+  private releaseLock: (() => void) | undefined;
 
   private readonly onPageHide = (): void => this.detach();
   private readonly onPageShow = (event: PageTransitionEvent): void => {
@@ -57,7 +58,25 @@ export class SharedWorkerMarketConnection implements MarketConnection {
     worker.onerror = () => this.handleLoadFailure();
     worker.port.onmessage = (event: MessageEvent<WorkerToTabMessage>) => this.receive(event.data);
     this.port = worker.port;
-    this.post({ type: 'attach', url: this.url });
+    this.announce(worker.port);
+  }
+
+  /** A trava vem antes do `attach` para o worker sempre encontrá-la ocupada ao esperar por ela. */
+  private announce(port: MessagePort): void {
+    // `navigator.locks` só existe em contexto seguro, embora a lib `dom` o declare sempre.
+    const locks = navigator.locks as LockManager | undefined;
+    if (locks === undefined) {
+      this.post({ type: 'attach', url: this.url });
+      return;
+    }
+    const lock = `open-windows:tab:${crypto.randomUUID()}`;
+    void locks.request(lock, () => {
+      if (this.port !== port) {
+        return;
+      }
+      this.post({ type: 'attach', url: this.url, lock });
+      return new Promise<void>((resolve) => (this.releaseLock = resolve));
+    });
   }
 
   /** Não fecha a porta aqui: o worker a fecha depois de processar o `detach`. */
@@ -76,6 +95,8 @@ export class SharedWorkerMarketConnection implements MarketConnection {
       this.port.onmessage = null;
       this.port = undefined;
     }
+    this.releaseLock?.();
+    this.releaseLock = undefined;
   }
 
   private receive(data: WorkerToTabMessage): void {

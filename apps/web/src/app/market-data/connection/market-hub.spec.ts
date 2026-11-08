@@ -16,8 +16,8 @@ class FakeTab {
     });
   }
 
-  attach(): this {
-    this.receive({ type: 'attach', url: 'ws://teste' });
+  attach(lock?: string): this {
+    this.receive(lock === undefined ? { type: 'attach', url: 'ws://teste' } : { type: 'attach', url: 'ws://teste', lock });
     return this;
   }
 
@@ -366,6 +366,64 @@ describe('MarketHub', () => {
       socket.receive(candlesResponse(requestId, 'ALFA3'));
 
       expect(second.messages).toEqual([]);
+    });
+  });
+
+  describe('aba encerrada sem aviso', () => {
+    let exits: Map<string, () => void>;
+
+    beforeEach(() => {
+      exits = new Map();
+      hub = new MarketHub((lock, onExit) => exits.set(lock, onExit));
+    });
+
+    it('espera a trava informada pela aba', () => {
+      new FakeTab(hub).attach('trava-1');
+
+      expect([...exits.keys()]).toEqual(['trava-1']);
+    });
+
+    it('libera as assinaturas exclusivas quando a trava é liberada', () => {
+      const first = new FakeTab(hub).attach('trava-1');
+      const socket = FakeWebSocket.last;
+      socket.open();
+      socket.receive(welcome());
+      const second = new FakeTab(hub).attach('trava-2');
+      second.send({ type: 'subscribe', channel: 'positions' });
+      socket.sent.length = 0;
+
+      exits.get('trava-2')?.();
+
+      expect(socket.sent).toEqual([{ type: 'unsubscribe', channel: 'positions' }]);
+      expect(second.closed).toBe(true);
+      expect(first.closed).toBe(false);
+    });
+
+    it('fecha o socket quando a última aba some sem avisar', () => {
+      new FakeTab(hub).attach('trava-1');
+      const socket = FakeWebSocket.last;
+      socket.open();
+      socket.receive(welcome());
+
+      exits.get('trava-1')?.();
+
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    });
+
+    it('não libera duas vezes depois de um detach explícito', () => {
+      const first = new FakeTab(hub).attach('trava-1');
+      const socket = FakeWebSocket.last;
+      socket.open();
+      socket.receive(welcome());
+      const second = new FakeTab(hub).attach('trava-2');
+      second.send({ type: 'subscribe', channel: 'positions' });
+      second.detach();
+      socket.sent.length = 0;
+
+      exits.get('trava-2')?.();
+
+      expect(socket.sent).toEqual([]);
+      expect(first.closed).toBe(false);
     });
   });
 

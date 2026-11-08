@@ -2,7 +2,7 @@ import { registerLocaleData } from '@angular/common';
 import localePt from '@angular/common/locales/pt';
 import { DEFAULT_CURRENCY_CODE, LOCALE_ID, type Provider } from '@angular/core';
 
-import type { MarketStore } from '../market-store';
+import { ALL_MARKET_FEEDS, type MarketStore } from '../market-store';
 import type {
   AccountBalance,
   Candle,
@@ -170,11 +170,12 @@ export function answerCandles(socket: FakeWebSocket, candles: Candle[]): void {
   socket.receive(candlesMessage(request.requestId, request.symbol, candles));
 }
 
-/** Inicia o store e leva a conexão falsa até o `welcome`. */
+/** Inicia o store usando todos os dados e leva a conexão falsa até o `welcome`. */
 export function startConnected(
   store: MarketStore,
   symbols: readonly string[] = SYMBOLS,
 ): FakeWebSocket {
+  store.setFeeds(ALL_MARKET_FEEDS);
   store.start();
   const socket = FakeWebSocket.last;
   socket.open();

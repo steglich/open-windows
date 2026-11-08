@@ -118,6 +118,65 @@ describe('SharedWorkerMarketConnection', () => {
     expect(statuses).toEqual([]);
   });
 
+  describe('com Web Locks', () => {
+    let granted: { name: string; result: unknown }[];
+    let pendingCallbacks: { name: string; run: () => unknown }[];
+
+    beforeEach(() => {
+      granted = [];
+      pendingCallbacks = [];
+      vi.stubGlobal('navigator', {
+        locks: {
+          request: (name: string, callback: () => unknown) => {
+            pendingCallbacks.push({ name, run: () => {
+              const result = callback();
+              granted.push({ name, result });
+              return result;
+            } });
+            return Promise.resolve();
+          },
+        },
+      });
+    });
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('só se apresenta depois de obter a trava e a informa ao worker', () => {
+      open();
+      expect(worker().posts).toEqual([]);
+
+      pendingCallbacks[0].run();
+
+      expect(worker().posts).toEqual([
+        { type: 'attach', url: 'ws://teste', lock: pendingCallbacks[0].name },
+      ]);
+    });
+
+    it('não se apresenta se a aba saiu antes de obter a trava', () => {
+      open();
+      const current = worker();
+      connection.close();
+      current.posts.length = 0;
+
+      pendingCallbacks[0].run();
+
+      expect(current.posts).toEqual([]);
+      expect(granted[0].result).toBeUndefined();
+    });
+
+    it('libera a trava ao se despedir do worker', async () => {
+      open();
+      pendingCallbacks[0].run();
+      let released = false;
+      void (granted[0].result as Promise<void>).then(() => (released = true));
+
+      connection.close();
+      await Promise.resolve();
+
+      expect(released).toBe(true);
+    });
+  });
+
   it('avisa o worker em pagehide', () => {
     open();
 

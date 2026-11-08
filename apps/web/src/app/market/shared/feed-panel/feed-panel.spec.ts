@@ -1,11 +1,13 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { FAKE_PANEL_WINDOW_PROVIDERS } from '../../panel-windows/testing/fake-panel-window';
 import { FeedPanel } from './feed-panel';
 
 describe('FeedPanel', () => {
   let fixture: ComponentFixture<FeedPanel>;
 
   beforeEach(() => {
+    TestBed.configureTestingModule({ providers: FAKE_PANEL_WINDOW_PROVIDERS });
     fixture = TestBed.createComponent(FeedPanel);
     fixture.componentRef.setInput('title', 'Cotações');
   });
@@ -47,6 +49,19 @@ describe('FeedPanel', () => {
     await fixture.whenStable();
 
     expect(section.classList).not.toContain('bg-card');
+  });
+
+  it('só oferece abrir em janela quando o painel é informado', async () => {
+    await render({ hasData: true, stale: false });
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.querySelector('app-panel-window-button')).toBeNull();
+
+    fixture.componentRef.setInput('windowPanel', 'quotes');
+    await fixture.whenStable();
+
+    expect(element.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'Abrir Cotações em janela',
+    );
   });
 
   it('não mostra avisos com dados atualizados', async () => {

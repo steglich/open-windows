@@ -44,6 +44,9 @@ export class MarketHub {
   private lastWelcome: Extract<ServerMessage, { type: 'welcome' }> | undefined;
   private portCount = 0;
 
+  /** `awaitExit` avisa quando a trava da aba é liberada, o que vale até para aba que travou. */
+  constructor(private readonly awaitExit?: (lock: string, onExit: () => void) => void) {}
+
   /** Devolve a função que trata as mensagens recebidas dessa porta. */
   addPort(port: HubPort): (message: TabToWorkerMessage) => void {
     const id = `p${++this.portCount}`;
@@ -51,6 +54,9 @@ export class MarketHub {
       switch (message.type) {
         case 'attach':
           this.attach(id, port, message.url);
+          if (message.lock !== undefined) {
+            this.awaitExit?.(message.lock, () => this.detach(id, port));
+          }
           break;
         case 'send': {
           const tab = this.tabs.get(id);

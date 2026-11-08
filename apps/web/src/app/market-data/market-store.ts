@@ -5,6 +5,8 @@ import { MarketSocket } from './market-socket';
 import type {
   AccountBalance,
   Candle,
+  Channel,
+  ClientMessage,
   ErrorCode,
   OrderBook,
   Portfolio,
@@ -17,7 +19,31 @@ export interface MarketError {
   message: string;
 }
 
+/** Dados que um painel pode precisar. `selectedQuote` é a cotação só do ativo selecionado. */
+export type MarketFeed = 'quotes' | 'selectedQuote' | 'book' | 'candles' | 'positions' | 'account';
+
+export const ALL_MARKET_FEEDS: readonly MarketFeed[] = [
+  'quotes',
+  'selectedQuote',
+  'book',
+  'candles',
+  'positions',
+  'account',
+];
+
+/** Por canal, os ativos assinados. `null` significa todos, ou um canal sem ativos. */
+type Subscriptions = ReadonlyMap<Channel, readonly string[] | null>;
+
+const CHANNEL_ORDER: readonly Channel[] = ['quote', 'positions', 'account', 'book', 'candle'];
+
 const CANDLE_LIMIT = 120;
+
+function sameTarget(
+  a: readonly string[] | null | undefined,
+  b: readonly string[] | null | undefined,
+): boolean {
+  return a === b || (!!a && !!b && a.join() === b.join());
+}
 
 function sameCandle(a: Candle, b: Candle): boolean {
   return (
@@ -45,6 +71,9 @@ export class MarketStore {
   private readonly candlesState = signal<readonly Candle[] | null>(null);
   private readonly lastErrorState = signal<MarketError | null>(null);
 
+  /** Começa vazio para um `welcome` anterior à rota não assinar o que o documento não usa. */
+  private feeds: ReadonlySet<MarketFeed> = new Set();
+  private subscriptions: Subscriptions = new Map();
   private candlesRequestCount = 0;
   private pendingCandlesRequestId: string | null = null;
 
@@ -77,27 +106,113 @@ export class MarketStore {
     this.socket.connect();
   }
 
+  /** Define os dados usados pelos painéis exibidos neste documento. */
+  setFeeds(feeds: Iterable<MarketFeed>): void {
+    const next = new Set(feeds);
+    if (next.size === this.feeds.size && [...next].every((feed) => this.feeds.has(feed))) {
+      return;
+    }
+    this.feeds = next;
+    this.discardUnusedData();
+    this.syncSubscriptions();
+  }
+
   select(symbol: string): void {
-    const previous = this.selectedSymbolState();
-    if (symbol === previous) {
+    if (symbol === this.selectedSymbolState()) {
       return;
     }
     this.selectedSymbolState.set(symbol);
     this.clearSelectionData();
-    if (this.status() !== 'connected') {
-      return;
-    }
-    if (previous !== null) {
-      this.socket.send({ type: 'unsubscribe', channel: 'book', symbols: [previous] });
-      this.socket.send({ type: 'unsubscribe', channel: 'candle', symbols: [previous] });
-    }
-    this.subscribeSelected(symbol);
+    this.discardUnusedData();
+    this.syncSubscriptions();
   }
 
-  private subscribeSelected(symbol: string): void {
-    this.socket.send({ type: 'subscribe', channel: 'book', symbols: [symbol] });
-    this.socket.send({ type: 'subscribe', channel: 'candle', symbols: [symbol] });
-    this.requestCandles(symbol);
+  /** Único ponto que assina e cancela, comparando o que é desejado com o que está assinado. */
+  private syncSubscriptions(): void {
+    if (this.status() !== 'connected' || this.symbolsState().length === 0) {
+      return;
+    }
+    const current = this.subscriptions;
+    const wanted = this.wantedSubscriptions();
+    const changed = CHANNEL_ORDER.filter(
+      (channel) => !sameTarget(current.get(channel), wanted.get(channel)),
+    );
+
+    changed
+      .filter((channel) => current.has(channel))
+      .forEach((channel) => this.sendSubscription('unsubscribe', channel, current));
+    changed
+      .filter((channel) => wanted.has(channel))
+      .forEach((channel) => this.sendSubscription('subscribe', channel, wanted));
+    this.subscriptions = wanted;
+
+    const selected = this.selectedSymbolState();
+    if (changed.includes('candle') && wanted.has('candle') && selected !== null) {
+      this.requestCandles(selected);
+    }
+  }
+
+  private wantedSubscriptions(): Subscriptions {
+    const wanted = new Map<Channel, readonly string[] | null>();
+    const selected = this.selectedSymbolState();
+
+    if (this.feeds.has('quotes')) {
+      wanted.set('quote', null);
+    } else if (this.feeds.has('selectedQuote') && selected !== null) {
+      wanted.set('quote', [selected]);
+    }
+    if (this.feeds.has('positions')) {
+      wanted.set('positions', null);
+    }
+    if (this.feeds.has('account')) {
+      wanted.set('account', null);
+    }
+    if (this.feeds.has('book') && selected !== null) {
+      wanted.set('book', [selected]);
+    }
+    if (this.feeds.has('candles') && selected !== null) {
+      wanted.set('candle', [selected]);
+    }
+    return wanted;
+  }
+
+  private sendSubscription(
+    type: 'subscribe' | 'unsubscribe',
+    channel: Channel,
+    subscriptions: Subscriptions,
+  ): void {
+    const symbols = subscriptions.get(channel);
+    const message: ClientMessage = symbols ? { type, channel, symbols: [...symbols] } : { type, channel };
+    this.socket.send(message);
+  }
+
+  /** O servidor reenvia o estado ao assinar de novo, então nada antigo precisa ser mantido. */
+  private discardUnusedData(): void {
+    if (!this.feeds.has('positions')) {
+      this.portfolioState.set(null);
+    }
+    if (!this.feeds.has('account')) {
+      this.accountState.set(null);
+    }
+    if (!this.feeds.has('book')) {
+      this.bookState.set(null);
+    }
+    if (!this.feeds.has('candles')) {
+      this.candlesState.set(null);
+      this.pendingCandlesRequestId = null;
+    }
+    if (!this.feeds.has('quotes')) {
+      this.quotes.update((quotes) =>
+        Object.fromEntries(Object.entries(quotes).filter(([symbol]) => this.usesQuote(symbol))),
+      );
+    }
+  }
+
+  private usesQuote(symbol: string): boolean {
+    return (
+      this.feeds.has('quotes') ||
+      (this.feeds.has('selectedQuote') && symbol === this.selectedSymbolState())
+    );
   }
 
   private clearSelectionData(): void {
@@ -133,20 +248,24 @@ export class MarketStore {
         this.applyQuotes(message.data);
         break;
       case 'book':
-        if (message.data.symbol === this.selectedSymbolState()) {
+        if (this.feeds.has('book') && message.data.symbol === this.selectedSymbolState()) {
           this.bookState.set(message.data);
         }
         break;
       case 'candle':
-        if (message.data.symbol === this.selectedSymbolState()) {
+        if (this.feeds.has('candles') && message.data.symbol === this.selectedSymbolState()) {
           this.applyCandle(message.data.symbol, message.data.candle);
         }
         break;
       case 'positions':
-        this.portfolioState.set(message.data);
+        if (this.feeds.has('positions')) {
+          this.portfolioState.set(message.data);
+        }
         break;
       case 'account':
-        this.accountState.set(message.data);
+        if (this.feeds.has('account')) {
+          this.accountState.set(message.data);
+        }
         break;
       case 'candles':
         if (message.requestId === this.pendingCandlesRequestId) {
@@ -162,9 +281,13 @@ export class MarketStore {
 
   /** Aplica o lote em uma única atualização, já que ele pode trazer centenas de ativos. */
   private applyQuotes(batch: readonly Quote[]): void {
+    const used = batch.filter(({ symbol }) => this.usesQuote(symbol));
+    if (used.length === 0) {
+      return;
+    }
     this.quotes.update((quotes) => {
       const updated = { ...quotes };
-      for (const quote of batch) {
+      for (const quote of used) {
         updated[quote.symbol] = quote;
       }
       return updated;
@@ -201,11 +324,8 @@ export class MarketStore {
       this.clearSelectionData();
     }
 
-    this.socket.send({ type: 'subscribe', channel: 'quote' });
-    this.socket.send({ type: 'subscribe', channel: 'positions' });
-    this.socket.send({ type: 'subscribe', channel: 'account' });
-    if (selected !== null) {
-      this.subscribeSelected(selected);
-    }
+    this.discardUnusedData();
+    this.subscriptions = new Map();
+    this.syncSubscriptions();
   }
 }

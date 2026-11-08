@@ -1,0 +1,22 @@
+<main class="min-h-screen p-4">
+  @switch (panel.id) {
+    @case ('status') {
+      <app-connection-status-panel />
+    }
+    @case ('account') {
+      <app-account-panel class="block min-w-0" />
+    }
+    @case ('chart') {
+      <app-price-chart-panel class="block min-w-0" />
+    }
+    @case ('quotes') {
+      <app-quotes-panel class="block min-w-0" />
+    }
+    @case ('book') {
+      <app-order-book-panel class="block min-w-0" />
+    }
+    @case ('portfolio') {
+      <app-portfolio-panel class="block min-w-0" />
+    }
+  }
+</main>

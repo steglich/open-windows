@@ -10,7 +10,7 @@
     >
       <path d="M4 4h16v16H4zM12 4v16M4 12h16" stroke-linejoin="round" />
     </svg>
-    @for (section of sections; track section.id) {
+    @for (section of sections(); track section.id) {
       <a
         [href]="'#' + section.id"
         [attr.aria-label]="section.label"
@@ -40,19 +40,47 @@
         <p class="mt-1 text-sm text-ink-muted">Mercado simulado em tempo real</p>
       </div>
       <div class="flex items-start gap-3">
-        <app-connection-status-panel />
+        @if (!windows.isDetached('status')) {
+          <app-connection-status-panel />
+        }
         <app-theme-toggle />
       </div>
     </header>
 
-    <div id="visao-geral" class="grid scroll-mt-20 gap-6 xl:grid-cols-12">
-      <app-account-panel class="block min-w-0 xl:col-span-5" />
-      <app-price-chart-panel class="block min-w-0 xl:col-span-7" />
-    </div>
-    <app-quotes-panel id="cotacoes" class="block min-w-0 scroll-mt-20" />
-    <app-order-book-panel id="book" class="block min-w-0 scroll-mt-20" />
-    <app-portfolio-panel id="carteira" class="block min-w-0 scroll-mt-20" />
+    @if (windows.blocked()) {
+      <p role="alert" class="text-sm text-loss">
+        A janela não abriu. Verifique se o navegador bloqueou pop-ups deste site e tente novamente.
+      </p>
+    }
+
+    @if (allDetached()) {
+      <p class="text-sm text-ink-muted">Todos os painéis estão em janelas separadas.</p>
+    }
+
+    @if (!windows.isDetached('account') || !windows.isDetached('chart')) {
+      <div id="visao-geral" class="grid scroll-mt-20 gap-6 xl:grid-cols-12">
+        @if (!windows.isDetached('account')) {
+          <app-account-panel
+            class="block min-w-0"
+            [class]="overviewHasBothPanels() ? 'xl:col-span-5' : 'xl:col-span-12'"
+          />
+        }
+        @if (!windows.isDetached('chart')) {
+          <app-price-chart-panel
+            class="block min-w-0"
+            [class]="overviewHasBothPanels() ? 'xl:col-span-7' : 'xl:col-span-12'"
+          />
+        }
+      </div>
+    }
+    @if (!windows.isDetached('quotes')) {
+      <app-quotes-panel id="cotacoes" class="block min-w-0 scroll-mt-20" />
+    }
+    @if (!windows.isDetached('book')) {
+      <app-order-book-panel id="book" class="block min-w-0 scroll-mt-20" />
+    }
+    @if (!windows.isDetached('portfolio')) {
+      <app-portfolio-panel id="carteira" class="block min-w-0 scroll-mt-20" />
+    }
   </main>
 </div>
-
-<router-outlet />

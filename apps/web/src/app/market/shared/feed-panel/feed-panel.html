@@ -6,11 +6,16 @@
         <p class="text-sm text-ink-muted">{{ subtitle() }}</p>
       }
     </div>
-    @if (stale()) {
-      <span class="rounded-full bg-amber px-3 py-0.5 text-xs font-medium text-navy">
-        Dados desatualizados
-      </span>
-    }
+    <div class="flex items-center gap-2">
+      @if (stale()) {
+        <span class="rounded-full bg-amber px-3 py-0.5 text-xs font-medium text-navy">
+          Dados desatualizados
+        </span>
+      }
+      @if (windowPanel(); as panel) {
+        <app-panel-window-button [panel]="panel" />
+      }
+    </div>
   </header>
   @if (!hasData()) {
     <p class="text-sm text-ink-muted">Aguardando dados…</p>

@@ -5,6 +5,7 @@ import { MarketStore } from '../../market-data/market-store';
 import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
 import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from '../../market-data/testing/in-process-market-connection';
 import { startConnected, textOf } from '../../market-data/testing/market-fixtures';
+import { FAKE_PANEL_WINDOW_PROVIDERS } from '../panel-windows/testing/fake-panel-window';
 import { ConnectionStatusPanel } from './connection-status-panel';
 
 describe('ConnectionStatusPanel', () => {
@@ -14,7 +15,9 @@ describe('ConnectionStatusPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     FakeWebSocket.instances = [];
-    TestBed.configureTestingModule({ providers: IN_PROCESS_MARKET_CONNECTION_PROVIDERS });
+    TestBed.configureTestingModule({
+      providers: [...IN_PROCESS_MARKET_CONNECTION_PROVIDERS, ...FAKE_PANEL_WINDOW_PROVIDERS],
+    });
     store = TestBed.inject(MarketStore);
     fixture = TestBed.createComponent(ConnectionStatusPanel);
   });
@@ -28,6 +31,14 @@ describe('ConnectionStatusPanel', () => {
     await fixture.whenStable();
     return textOf(fixture.nativeElement);
   }
+
+  it('oferece abrir o painel em janela', async () => {
+    await text();
+
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('button')?.getAttribute('aria-label'),
+    ).toBe('Abrir Status da conexão em janela');
+  });
 
   it('indica que está desconectado antes de iniciar', async () => {
     expect(await text()).toContain('Desconectado');

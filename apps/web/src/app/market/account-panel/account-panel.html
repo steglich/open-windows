@@ -1,5 +1,6 @@
 <app-feed-panel
   title="Saldo"
+  windowPanel="account"
   variant="plain"
   [subtitle]="store.account() ? 'Conta ' + store.account()!.accountId : ''"
   [hasData]="store.account() !== null"

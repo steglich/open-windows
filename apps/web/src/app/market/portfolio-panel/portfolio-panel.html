@@ -1,4 +1,9 @@
-<app-feed-panel title="Carteira" [hasData]="store.portfolio() !== null" [stale]="store.stale()">
+<app-feed-panel
+  title="Carteira"
+  windowPanel="portfolio"
+  [hasData]="store.portfolio() !== null"
+  [stale]="store.stale()"
+>
   @if (store.portfolio(); as portfolio) {
     <div class="grid gap-6 xl:grid-cols-12">
       @if (slices().length > 0) {

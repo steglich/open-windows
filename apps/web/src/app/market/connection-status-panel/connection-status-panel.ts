@@ -2,6 +2,7 @@ import { Component, computed, inject } from '@angular/core';
 
 import type { ConnectionStatus } from '../../market-data/market-socket';
 import { MarketStore } from '../../market-data/market-store';
+import { PanelWindowButton } from '../panel-windows/panel-window-button';
 
 const STATUS_DISPLAY: Record<ConnectionStatus, { label: string; tone: string; dot: string }> = {
   connecting: { label: 'Conectando…', tone: 'text-ink-muted', dot: 'bg-ink-muted' },
@@ -13,6 +14,7 @@ const STATUS_DISPLAY: Record<ConnectionStatus, { label: string; tone: string; do
 
 @Component({
   selector: 'app-connection-status-panel',
+  imports: [PanelWindowButton],
   templateUrl: './connection-status-panel.html',
 })
 export class ConnectionStatusPanel {

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 
 import type { ClientMessage } from './market-protocol';
-import { MarketStore } from './market-store';
+import { MarketStore, type MarketFeed } from './market-store';
 import { FakeWebSocket } from './testing/fake-web-socket';
 import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from './testing/in-process-market-connection';
 import {
@@ -398,6 +398,173 @@ describe('MarketStore', () => {
         channel: 'book',
         symbols: ['BETA4'],
       });
+    });
+  });
+
+  describe('assinaturas por demanda', () => {
+    function startWith(...feeds: MarketFeed[]): FakeWebSocket {
+      store.setFeeds(feeds);
+      store.start();
+      const socket = FakeWebSocket.last;
+      socket.open();
+      socket.receive(welcome());
+      return socket;
+    }
+
+    /** Devolve o que foi enviado desde a última chamada. */
+    function drain(socket: FakeWebSocket): ClientMessage[] {
+      return socket.sent.splice(0);
+    }
+
+    it('não assina nada sem dados em uso', () => {
+      expect(startWith().sent).toEqual([]);
+    });
+
+    it('assina somente positions', () => {
+      expect(startWith('positions').sent).toEqual([{ type: 'subscribe', channel: 'positions' }]);
+    });
+
+    it('assina somente account', () => {
+      expect(startWith('account').sent).toEqual([{ type: 'subscribe', channel: 'account' }]);
+    });
+
+    it('assina as cotações de todos os ativos sem book nem candles', () => {
+      expect(startWith('quotes').sent).toEqual([{ type: 'subscribe', channel: 'quote' }]);
+    });
+
+    it('assina somente o book do ativo selecionado', () => {
+      expect(startWith('book').sent).toEqual([
+        { type: 'subscribe', channel: 'book', symbols: ['ALFA3'] },
+      ]);
+    });
+
+    it('o gráfico assina cotação e candle somente do ativo selecionado e consulta os candles', () => {
+      expect(startWith('selectedQuote', 'candles').sent).toEqual([
+        { type: 'subscribe', channel: 'quote', symbols: ['ALFA3'] },
+        { type: 'subscribe', channel: 'candle', symbols: ['ALFA3'] },
+        getCandles('candles-1', 'ALFA3'),
+      ]);
+    });
+
+    it('não troca assinatura ao selecionar outro ativo usando só as cotações', () => {
+      const socket = startWith('quotes');
+      drain(socket);
+
+      store.select('BETA4');
+
+      expect(socket.sent).toEqual([]);
+    });
+
+    it('troca a cotação selecionada e descarta a do ativo anterior', () => {
+      const socket = startWith('selectedQuote');
+      socket.receive(quoteMessage('ALFA3'));
+      drain(socket);
+
+      store.select('BETA4');
+
+      expect(socket.sent).toEqual([
+        { type: 'unsubscribe', channel: 'quote', symbols: ['ALFA3'] },
+        { type: 'subscribe', channel: 'quote', symbols: ['BETA4'] },
+      ]);
+      expect(store.quoteRows()).toEqual([]);
+    });
+
+    it('cancela e descarta o dado que deixou de ser usado', () => {
+      const socket = startWith('quotes', 'positions');
+      socket.receive(positionsMessage());
+      drain(socket);
+
+      store.setFeeds(['quotes']);
+
+      expect(socket.sent).toEqual([{ type: 'unsubscribe', channel: 'positions' }]);
+      expect(store.portfolio()).toBeNull();
+    });
+
+    it('ignora mensagens atrasadas de dados sem uso', () => {
+      const socket = startWith('quotes', 'positions');
+      store.setFeeds(['quotes']);
+
+      socket.receive(positionsMessage());
+      socket.receive(accountMessage());
+
+      expect(store.portfolio()).toBeNull();
+      expect(store.account()).toBeNull();
+    });
+
+    it('assina de novo quando o dado volta a ser usado', () => {
+      const socket = startWith('quotes', 'positions');
+      store.setFeeds(['quotes']);
+      drain(socket);
+
+      store.setFeeds(['quotes', 'positions']);
+
+      expect(socket.sent).toEqual([{ type: 'subscribe', channel: 'positions' }]);
+    });
+
+    it('mantém só a cotação selecionada ao passar de todas para a selecionada', () => {
+      const socket = startWith('quotes', 'selectedQuote');
+      socket.receive(quotesMessage([quote('ALFA3'), quote('BETA4')]));
+      drain(socket);
+
+      store.setFeeds(['selectedQuote']);
+
+      expect(socket.sent).toEqual([
+        { type: 'unsubscribe', channel: 'quote' },
+        { type: 'subscribe', channel: 'quote', symbols: ['ALFA3'] },
+      ]);
+      expect(store.quoteRows().map(({ symbol }) => symbol)).toEqual(['ALFA3']);
+
+      socket.receive(quoteMessage('BETA4'));
+      expect(store.quoteRows().map(({ symbol }) => symbol)).toEqual(['ALFA3']);
+    });
+
+    it('não reenvia assinaturas quando os dados em uso não mudam', () => {
+      const socket = startWith('quotes');
+      drain(socket);
+
+      store.setFeeds(['quotes']);
+
+      expect(socket.sent).toEqual([]);
+    });
+
+    it('consulta os candles quando o gráfico passa a ser usado', () => {
+      const socket = startWith('quotes');
+      drain(socket);
+
+      store.setFeeds(['quotes', 'selectedQuote', 'candles']);
+
+      expect(socket.sent).toEqual([
+        { type: 'subscribe', channel: 'candle', symbols: ['ALFA3'] },
+        getCandles('candles-1', 'ALFA3'),
+      ]);
+    });
+
+    it('descarta os candles quando o gráfico deixa de ser usado', () => {
+      const socket = startWith('candles');
+      answerCandles(socket, [candle(MINUTE)]);
+
+      store.setFeeds([]);
+
+      expect(store.candles()).toBeNull();
+    });
+
+    it('refaz no welcome somente o que está em uso', () => {
+      const socket = startWith('positions', 'quotes');
+      store.setFeeds(['positions']);
+      socket.drop();
+
+      expect(reconnect().sent).toEqual([{ type: 'subscribe', channel: 'positions' }]);
+    });
+
+    it('sem conexão, deixa as assinaturas para o próximo welcome', () => {
+      const socket = startWith('quotes');
+      socket.drop();
+      drain(socket);
+
+      store.setFeeds(['account']);
+
+      expect(socket.sent).toEqual([]);
+      expect(reconnect().sent).toEqual([{ type: 'subscribe', channel: 'account' }]);
     });
   });
 
