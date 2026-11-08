@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A pnpm + Turborepo monorepo for a simulated homebroker. There is no lint or CI setup.
 
 - `apps/server`: Node + TypeScript WebSocket server that publishes fictitious market data from memory.
-- `apps/web`: Angular app. It is only a base for now and does not connect to the server.
+- `apps/web`: Angular app styled with Tailwind CSS that shows the server's market data in real time.
 
 ## Commands
 
@@ -15,14 +15,14 @@ Run from the repository root.
 
 ```bash
 pnpm install                                      # Install all projects
-pnpm dev                                          # Server on ws://127.0.0.1:8080 and web on http://localhost:4200
+pnpm dev                                          # Server on ws://127.0.0.1:8090 and web on http://localhost:4200
 pnpm build                                        # Build all projects
 pnpm test                                         # Run all tests once
 pnpm turbo run dev --filter=server                # Run a task in one project (server or web)
 pnpm --filter server exec vitest run src/gateway.test.ts   # Run a single server test file
 ```
 
-The server reads `PORT` (default `8080`) and `HOST` (default `127.0.0.1`). `turbo.json` passes them through to `dev` only, so a new environment variable must be added there or Turborepo filters it out.
+The server reads `PORT` (default `8090`) and `HOST` (default `127.0.0.1`). `turbo.json` passes them through to `dev` only, so a new environment variable must be added there or Turborepo filters it out.
 
 Inside WSL, the `ng` on `PATH` may be the Windows binary. Use the project's CLI instead, for example `pnpm --filter web exec ng generate ...`.
 
@@ -36,6 +36,14 @@ The protocol contract (message shapes, channels, error codes) is specified in th
 - Prices are integer cents internally and are converted to reais only when building messages (`centsToReais`). Keep arithmetic in cents.
 - `startGateway` takes the port, cycle interval, and random source as options. Tests use port `0`, short cycles, a seeded random source, and real WebSocket clients (`TestClient` in `src/test-utils.ts`).
 - `tsconfig.json` excludes `*.test.ts` and `test-utils.ts`, so `pnpm build` does not type-check tests.
+
+## Web architecture
+
+- `src/app/market-data/` has no UI. `MarketSocket` owns the single connection (reconnection, silence detection, shutdown) and `MarketStore` holds the state as signals. Components under `src/app/market/` only read the store, so do not open sockets or subscribe to channels from a component.
+- Messages go from socket to store through an RxJS `Subject`, not a signal, because a signal would drop all but the last message of a burst.
+- Every `welcome` redoes the subscriptions, since they do not survive a reconnection on the server.
+- `market-protocol.ts` copies the types from `apps/server/src/protocol.ts`, so change both together.
+- Components use only Tailwind utility classes. Specs use `FakeWebSocket` and the helpers in `market-data/testing/`.
 
 ## Spec-driven workflow (OpenSpec)
 

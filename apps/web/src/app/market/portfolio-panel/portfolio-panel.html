@@ -1,0 +1,48 @@
+<app-feed-panel title="Carteira" [hasData]="store.portfolio() !== null" [stale]="store.stale()">
+  @if (store.portfolio(); as portfolio) {
+    <dl class="mb-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      <div>
+        <dt class="text-xs text-slate-500">Conta</dt>
+        <dd class="font-semibold text-slate-900">{{ portfolio.accountId }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs text-slate-500">Valor total</dt>
+        <dd class="font-semibold text-slate-900">{{ portfolio.totalMarketValue | currency }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs text-slate-500">Resultado total</dt>
+        <dd class="font-semibold"><app-signed-value [value]="portfolio.totalUnrealizedPnl" /></dd>
+      </div>
+    </dl>
+    <div class="overflow-x-auto">
+      <table class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
+        <thead class="text-xs text-slate-500">
+          <tr>
+            <th scope="col" class="text-left">Ativo</th>
+            <th scope="col">Quantidade</th>
+            <th scope="col">Preço médio</th>
+            <th scope="col">Último</th>
+            <th scope="col">Valor de mercado</th>
+            <th scope="col">Resultado</th>
+            <th scope="col">Resultado %</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (position of portfolio.positions; track position.symbol) {
+            <tr class="border-t border-slate-100">
+              <th scope="row" class="text-left font-semibold text-slate-900">
+                {{ position.symbol }}
+              </th>
+              <td>{{ position.quantity | number }}</td>
+              <td>{{ position.averagePrice | currency }}</td>
+              <td>{{ position.lastPrice | currency }}</td>
+              <td>{{ position.marketValue | currency }}</td>
+              <td><app-signed-value [value]="position.unrealizedPnl" /></td>
+              <td><app-signed-value [value]="position.unrealizedPnlPercent" kind="percent" /></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</app-feed-panel>

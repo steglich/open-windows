@@ -1,12 +1,19 @@
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
+import { FakeWebSocket } from './market-data/testing/fake-web-socket';
 
 describe('App', () => {
   beforeEach(async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    FakeWebSocket.instances = [];
     await TestBed.configureTestingModule({
       imports: [App],
     })
       .compileComponents();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('should create the app', () => {
@@ -20,5 +27,21 @@ describe('App', () => {
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('h1')?.textContent).toContain('Open Windows Homebroker');
+  });
+
+  it('exibe os quatro painéis sem abrir conexão', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+
+    for (const panel of [
+      'app-connection-status-panel',
+      'app-quotes-panel',
+      'app-order-book-panel',
+      'app-portfolio-panel',
+    ]) {
+      expect(compiled.querySelector(panel)).not.toBeNull();
+    }
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 });

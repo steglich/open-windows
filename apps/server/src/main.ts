@@ -3,7 +3,7 @@ import { startGateway } from './gateway.js';
 function readPort(): number {
   const raw = process.env.PORT;
   if (!raw) {
-    return 8080;
+    return 8090;
   }
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {

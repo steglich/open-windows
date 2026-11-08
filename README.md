@@ -1,11 +1,11 @@
 # Open Windows Homebroker
 
-Monorepo de um homebroker simulado. Um servidor Node.js publica por WebSocket cotações, book de ofertas e posições em tempo real, e uma aplicação Angular será o frontend que consome esses dados.
+Monorepo de um homebroker simulado. Um servidor Node.js publica por WebSocket cotações, book de ofertas e posições em tempo real, e uma aplicação Angular exibe esses dados na tela.
 
 > [!NOTE]
 > Todos os dados são fictícios e gerados em memória. Não há conexão com corretoras, bolsas ou feeds de mercado.
 
-No momento, o frontend é apenas a base da aplicação e ainda não se conecta ao servidor.
+O frontend se conecta ao servidor em `ws://127.0.0.1:8090` e mostra o status da conexão, as cotações, o book de ofertas do ativo selecionado e a carteira. Se a conexão cair, ele mantém os últimos dados marcados como desatualizados e reconecta sozinho.
 
 ## Requisitos
 
@@ -26,7 +26,7 @@ Com o ambiente no ar:
 
 | Serviço | Endereço |
 | --- | --- |
-| Servidor WebSocket | `ws://127.0.0.1:8080` |
+| Servidor WebSocket | `ws://127.0.0.1:8090` |
 | Aplicação web | `http://localhost:4200` |
 
 ## Scripts
@@ -44,7 +44,7 @@ Execute na raiz do repositório. As tarefas são orquestradas pelo [Turborepo](h
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `PORT` | `8080` | Porta do WebSocket |
+| `PORT` | `8090` | Porta do WebSocket |
 | `HOST` | `127.0.0.1` | Endereço em que o servidor escuta |
 
 O servidor não tem autenticação. Se usar WSL2 e o navegador no Windows não alcançar o servidor, inicie-o com `HOST=0.0.0.0`.
@@ -56,7 +56,7 @@ Todas as mensagens são objetos JSON enviados como texto, com um campo `type`. A
 ### Exemplo
 
 ```js
-const socket = new WebSocket('ws://127.0.0.1:8080');
+const socket = new WebSocket('ws://127.0.0.1:8090');
 
 socket.onopen = () => {
   socket.send(JSON.stringify({ type: 'subscribe', channel: 'quote', symbols: ['ALFA3'] }));

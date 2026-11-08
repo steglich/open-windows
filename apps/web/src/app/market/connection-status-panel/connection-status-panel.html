@@ -1,0 +1,8 @@
+<app-feed-panel title="Conexão" [hasData]="true">
+  <p role="status" class="text-sm font-medium" [class]="display().tone">{{ display().label }}</p>
+  @if (store.lastError(); as error) {
+    <p role="alert" class="mt-2 text-sm text-red-700">
+      <span class="font-mono font-semibold">{{ error.code }}</span>: {{ error.message }}
+    </p>
+  }
+</app-feed-panel>

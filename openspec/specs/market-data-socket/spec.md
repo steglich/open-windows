@@ -7,10 +7,10 @@ Define o contrato da conexão WebSocket do servidor simulado: como os clientes s
 ## Requirements
 
 ### Requirement: Conexões WebSocket
-O servidor SHALL aceitar várias conexões WebSocket simultâneas na porta definida pela variável `PORT`, usando `8080` quando ela não estiver definida.
+O servidor SHALL aceitar várias conexões WebSocket simultâneas na porta definida pela variável `PORT`, usando `8090` quando ela não estiver definida.
 
 #### Scenario: Porta padrão
-- **WHEN** o servidor é iniciado sem a variável `PORT` e um cliente se conecta à porta `8080`
+- **WHEN** o servidor é iniciado sem a variável `PORT` e um cliente se conecta à porta `8090`
 - **THEN** a conexão é estabelecida
 
 #### Scenario: Porta configurada

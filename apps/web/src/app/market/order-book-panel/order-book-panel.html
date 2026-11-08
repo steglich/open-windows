@@ -1,0 +1,41 @@
+<app-feed-panel
+  title="Book de ofertas"
+  [hasData]="store.book() !== null"
+  [stale]="store.stale()"
+>
+  <p class="mb-2 text-sm font-semibold text-slate-700">{{ store.selectedSymbol() }}</p>
+  @if (store.book(); as book) {
+    <div class="grid gap-4 sm:grid-cols-2">
+      <ng-container
+        [ngTemplateOutlet]="side"
+        [ngTemplateOutletContext]="{ label: 'Compra', levels: book.bids, tone: 'text-emerald-700' }"
+      />
+      <ng-container
+        [ngTemplateOutlet]="side"
+        [ngTemplateOutletContext]="{ label: 'Venda', levels: book.asks, tone: 'text-red-700' }"
+      />
+    </div>
+  }
+</app-feed-panel>
+
+<ng-template #side let-label="label" let-levels="levels" let-tone="tone">
+  <table class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
+    <caption class="mb-1 text-left text-sm font-medium" [class]="tone">{{ label }}</caption>
+    <thead class="text-xs text-slate-500">
+      <tr>
+        <th scope="col">Preço</th>
+        <th scope="col">Quantidade</th>
+        <th scope="col">Ordens</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (level of levels; track level.price) {
+        <tr class="border-t border-slate-100">
+          <td>{{ level.price | currency }}</td>
+          <td>{{ level.quantity | number }}</td>
+          <td>{{ level.orders | number }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</ng-template>

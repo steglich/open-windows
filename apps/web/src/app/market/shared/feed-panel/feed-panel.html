@@ -1,0 +1,14 @@
+<section class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+  <header class="mb-3 flex items-center justify-between gap-2">
+    <h2 class="text-lg font-semibold text-slate-900">{{ title() }}</h2>
+    @if (stale()) {
+      <span class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+        Dados desatualizados
+      </span>
+    }
+  </header>
+  @if (!hasData()) {
+    <p class="text-sm text-slate-500">Aguardando dados…</p>
+  }
+  <ng-content />
+</section>

@@ -1,3 +1,12 @@
-<h1>{{ title() }}</h1>
+<main class="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+  <h1 class="text-2xl font-bold text-slate-900">{{ title() }}</h1>
+
+  <app-connection-status-panel />
+  <app-quotes-panel />
+  <div class="grid gap-4 lg:grid-cols-2">
+    <app-order-book-panel />
+    <app-portfolio-panel />
+  </div>
+</main>
 
 <router-outlet />

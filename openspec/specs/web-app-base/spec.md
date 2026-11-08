@@ -23,10 +23,3 @@ A aplicação SHALL exibir no navegador uma página inicial que a identifica com
 #### Scenario: Abrir a aplicação
 - **WHEN** um desenvolvedor abre a aplicação em execução no navegador
 - **THEN** a página exibe o nome do homebroker, sem o conteúdo de exemplo gerado pelo Angular
-
-### Requirement: Sem conexão com o servidor nesta etapa
-A aplicação base MUST NOT abrir conexões com o WebSocket do servidor, pois esse consumo será definido em uma change futura.
-
-#### Scenario: Servidor desligado
-- **WHEN** a aplicação é aberta com o servidor desligado
-- **THEN** a página inicial é exibida normalmente e não há tentativas de conexão ao WebSocket
