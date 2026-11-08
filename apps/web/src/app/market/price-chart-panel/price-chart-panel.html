@@ -1,0 +1,23 @@
+<app-feed-panel
+  title="Gráfico de preço"
+  [subtitle]="subtitle()"
+  [hasData]="hasCandles()"
+  [stale]="store.stale()"
+>
+  @if (store.selectedQuote(); as quote) {
+    <p class="mb-2 flex flex-wrap items-baseline gap-3">
+      <span class="text-3xl font-semibold">{{ quote.last | currency }}</span>
+      <app-signed-value [value]="quote.change" />
+    </p>
+  }
+  @if (loadFailed()) {
+    <p role="alert" class="text-sm text-loss">Não foi possível carregar o gráfico.</p>
+  } @else if (hasCandles()) {
+    <app-apex-chart
+      class="min-h-75"
+      [options]="options()"
+      [series]="series()"
+      (loadFailed)="loadFailed.set(true)"
+    />
+  }
+</app-feed-panel>

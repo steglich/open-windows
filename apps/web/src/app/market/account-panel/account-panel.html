@@ -1,0 +1,22 @@
+<app-feed-panel
+  title="Saldo"
+  variant="plain"
+  [subtitle]="store.account() ? 'Conta ' + store.account()!.accountId : ''"
+  [hasData]="store.account() !== null"
+  [stale]="store.stale()"
+>
+  <div class="grid gap-4 sm:grid-cols-2">
+    @for (card of cards(); track card.label; let first = $first) {
+      <article
+        class="flex min-h-36 min-w-0 flex-col justify-between gap-3 rounded-3xl p-5 xl:min-h-48"
+        [class]="first ? 'bg-highlight text-highlight-ink' : 'border border-line bg-card text-ink'"
+      >
+        <h3 class="text-sm">{{ card.label }}</h3>
+        <p class="text-2xl font-semibold wrap-break-word">{{ card.value | currency }}</p>
+        <p class="text-xs" [class]="first ? 'text-highlight-muted' : 'text-ink-muted'">
+          {{ card.hint }}
+        </p>
+      </article>
+    }
+  </div>
+</app-feed-panel>

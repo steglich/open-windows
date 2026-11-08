@@ -1,8 +1,15 @@
-<app-feed-panel title="Conexão" [hasData]="true">
-  <p role="status" class="text-sm font-medium" [class]="display().tone">{{ display().label }}</p>
+<div class="flex flex-col items-start gap-1 sm:items-end">
+  <p
+    role="status"
+    class="inline-flex items-center gap-2 rounded-full bg-card px-4 py-2 text-sm font-medium"
+    [class]="display().tone"
+  >
+    <span aria-hidden="true" class="size-2 rounded-full" [class]="display().dot"></span>
+    {{ display().label }}
+  </p>
   @if (store.lastError(); as error) {
-    <p role="alert" class="mt-2 text-sm text-red-700">
+    <p role="alert" class="max-w-md text-sm text-loss">
       <span class="font-mono font-semibold">{{ error.code }}</span>: {{ error.message }}
     </p>
   }
-</app-feed-panel>
+</div>

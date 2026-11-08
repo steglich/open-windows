@@ -7,6 +7,7 @@ import {
   quoteMessage,
   startConnected,
   textOf,
+  welcome,
 } from '../../market-data/testing/market-fixtures';
 import { QuotesPanel } from './quotes-panel';
 
@@ -37,6 +38,38 @@ describe('QuotesPanel', () => {
     const rows = Array.from(element().querySelectorAll('tbody tr'));
     return rows.find((candidate) => textOf(candidate).includes(symbol)) as HTMLTableRowElement;
   }
+
+  it('resume os ativos pelo sinal da variação', async () => {
+    socket.receive(welcome(['ALFA3', 'BETA4', 'GAMA3', 'DELT11']));
+    socket.receive(quoteMessage('ALFA3', { change: 1 }));
+    socket.receive(quoteMessage('BETA4', { change: 2 }));
+    socket.receive(quoteMessage('GAMA3', { change: -1 }));
+    socket.receive(quoteMessage('DELT11', { change: 0 }));
+    await fixture.whenStable();
+
+    const summary = Array.from(element().querySelectorAll('dl > div')).map((item) => [
+      textOf(item.querySelector('dt')!).trim(),
+      textOf(item.querySelector('dd')!).trim(),
+    ]);
+    expect(summary).toEqual([
+      ['Ativos', '4'],
+      ['Em alta', '2'],
+      ['Em baixa', '1'],
+      ['Estáveis', '1'],
+    ]);
+  });
+
+  it('rola internamente, com o cabeçalho fixo, sem omitir ativos', async () => {
+    for (const symbol of ['ALFA3', 'BETA4', 'GAMA3']) {
+      socket.receive(quoteMessage(symbol));
+    }
+    await fixture.whenStable();
+
+    const table = element().querySelector('table')!;
+    expect(table.parentElement!.classList).toContain('overflow-auto');
+    expect(table.className).toContain('[&_thead_th]:sticky');
+    expect(element().querySelectorAll('tbody tr')).toHaveLength(3);
+  });
 
   it('avisa que está aguardando enquanto não há cotações', async () => {
     await fixture.whenStable();
@@ -99,8 +132,8 @@ describe('QuotesPanel', () => {
       await fixture.whenStable();
 
       expect(store.selectedSymbol()).toBe('BETA4');
-      expect(row('BETA4').classList).toContain('bg-sky-100');
-      expect(row('ALFA3').classList).not.toContain('bg-sky-100');
+      expect(row('BETA4').classList).toContain('bg-selected');
+      expect(row('ALFA3').classList).not.toContain('bg-selected');
     });
 
     it('oferece um botão nativo na linha, que o Enter aciona', async () => {

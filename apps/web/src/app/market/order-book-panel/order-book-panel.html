@@ -1,41 +1,62 @@
 <app-feed-panel
   title="Book de ofertas"
+  variant="plain"
+  [subtitle]="store.selectedSymbol() ?? ''"
   [hasData]="store.book() !== null"
   [stale]="store.stale()"
 >
-  <p class="mb-2 text-sm font-semibold text-slate-700">{{ store.selectedSymbol() }}</p>
   @if (store.book(); as book) {
-    <div class="grid gap-4 sm:grid-cols-2">
+    <div class="relative grid gap-4 md:grid-cols-2 md:gap-6">
       <ng-container
         [ngTemplateOutlet]="side"
-        [ngTemplateOutletContext]="{ label: 'Compra', levels: book.bids, tone: 'text-emerald-700' }"
+        [ngTemplateOutletContext]="{ label: 'Compra', levels: book.bids, tone: 'text-gain' }"
       />
+      <p
+        data-testid="spread"
+        class="mx-auto flex size-24 flex-col items-center justify-center rounded-full bg-highlight text-highlight-ink ring-8 ring-app md:absolute md:top-6 md:left-1/2 md:z-10 md:-translate-x-1/2"
+      >
+        <span class="text-xs">Spread</span>
+        <span class="text-sm font-semibold">{{ book.spread | currency }}</span>
+      </p>
       <ng-container
         [ngTemplateOutlet]="side"
-        [ngTemplateOutletContext]="{ label: 'Venda', levels: book.asks, tone: 'text-red-700' }"
+        [ngTemplateOutletContext]="{ label: 'Venda', levels: book.asks, tone: 'text-loss', heroAlign: 'md:text-right' }"
       />
     </div>
   }
 </app-feed-panel>
 
-<ng-template #side let-label="label" let-levels="levels" let-tone="tone">
-  <table class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
-    <caption class="mb-1 text-left text-sm font-medium" [class]="tone">{{ label }}</caption>
-    <thead class="text-xs text-slate-500">
-      <tr>
-        <th scope="col">Preço</th>
-        <th scope="col">Quantidade</th>
-        <th scope="col">Ordens</th>
-      </tr>
-    </thead>
-    <tbody>
-      @for (level of levels; track level.price) {
-        <tr class="border-t border-slate-100">
-          <td>{{ level.price | currency }}</td>
-          <td>{{ level.quantity | number }}</td>
-          <td>{{ level.orders | number }}</td>
-        </tr>
-      }
-    </tbody>
-  </table>
+<ng-template #side let-label="label" let-levels="levels" let-tone="tone" let-heroAlign="heroAlign">
+  <article class="min-w-0 rounded-3xl border border-line bg-card p-5">
+    @if (levels[0]; as best) {
+      <!-- O destaque fica na borda externa de cada card para não passar sob o círculo do spread. -->
+      <p data-testid="best-price" class="mb-4 min-h-20" [class]="heroAlign">
+        <span class="block text-sm text-ink-muted">Melhor {{ label.toLowerCase() }}</span>
+        <span class="block text-4xl font-semibold" [class]="tone">{{ best.price | currency }}</span>
+      </p>
+    }
+    <div class="max-h-72 overflow-auto">
+      <table
+        class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-1.5 [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-card"
+      >
+        <caption class="sr-only">{{ label }}</caption>
+        <thead class="text-xs text-ink-muted uppercase">
+          <tr>
+            <th scope="col">Preço</th>
+            <th scope="col">Quantidade</th>
+            <th scope="col">Ordens</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (level of levels; track level.price) {
+            <tr class="border-t border-line">
+              <td>{{ level.price | currency }}</td>
+              <td>{{ level.quantity | number }}</td>
+              <td>{{ level.orders | number }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </article>
 </ng-template>

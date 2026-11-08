@@ -32,6 +32,23 @@ describe('FeedPanel', () => {
     expect(text).not.toContain('Aguardando dados');
   });
 
+  it('mostra o subtítulo quando informado', async () => {
+    fixture.componentRef.setInput('subtitle', 'Candles de 1 minuto');
+
+    expect(await render({ hasData: true, stale: false })).toContain('Candles de 1 minuto');
+  });
+
+  it('usa o fundo de card por padrão e dispensa o fundo na variante plain', async () => {
+    await render({ hasData: true, stale: false });
+    const section = (fixture.nativeElement as HTMLElement).querySelector('section')!;
+    expect(section.classList).toContain('bg-card');
+
+    fixture.componentRef.setInput('variant', 'plain');
+    await fixture.whenStable();
+
+    expect(section.classList).not.toContain('bg-card');
+  });
+
   it('não mostra avisos com dados atualizados', async () => {
     const text = await render({ hasData: true, stale: false });
 

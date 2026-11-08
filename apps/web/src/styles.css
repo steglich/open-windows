@@ -1,1 +1,65 @@
 @import "tailwindcss";
+
+/* Valores do tema claro. O escuro redefine as mesmas variáveis logo abaixo. */
+@theme {
+  /* Paleta base, igual nos dois temas. */
+  --color-navy: #12304a;
+  --color-blue: #2f6f99;
+  --color-teal: #79a9b8;
+  --color-cream: #fdf3e3;
+  --color-amber: #e8982f;
+  --color-rust: #b94b1b;
+
+  --color-app: #f4ecdf;
+  --color-sidebar: #efe6d6;
+  --color-card: #fbf6ec;
+  --color-card-raised: #f0e7d8;
+  --color-line: #e0d5c2;
+  --color-selected: #dbe8ec;
+  --color-ink: #12304a;
+  --color-ink-muted: #566b7d;
+  --color-highlight: #12304a;
+  --color-highlight-ink: #fdf3e3;
+  --color-highlight-muted: #a9bfcc;
+  --color-gain: #1f5f87;
+  --color-loss: #a84315;
+  --color-warning: #8a5206;
+
+  /* Repetidas em `market/shared/chart-theme.ts`, pois o ApexCharts exige cores literais. */
+  --color-series-1: #12304a;
+  --color-series-2: #2f6f99;
+  --color-series-3: #79a9b8;
+  --color-series-4: #e8982f;
+  --color-series-5: #c4521f;
+  --color-series-6: #d9c7a6;
+}
+
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-app: #000000;
+  --color-sidebar: #0a0a0a;
+  --color-card: #141414;
+  --color-card-raised: #1f1f1f;
+  --color-line: #2c2c2c;
+  --color-selected: #2b2b2b;
+  --color-ink: #fdf3e3;
+  --color-ink-muted: #a8a8a8;
+  --color-highlight: #fdf3e3;
+  --color-highlight-ink: #0a0a0a;
+  --color-highlight-muted: #5c5c5c;
+  --color-gain: #8cc3d3;
+  --color-loss: #f4a06a;
+  --color-warning: #e8982f;
+
+  --color-series-1: #79a9b8;
+  --color-series-2: #3f83b0;
+  --color-series-3: #fdf3e3;
+  --color-series-4: #e8982f;
+  --color-series-5: #dc6a35;
+  --color-series-6: #5a5a5a;
+}

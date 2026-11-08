@@ -23,19 +23,19 @@ describe('SignedValue', () => {
   it('mostra valor positivo com + e na cor de ganho', async () => {
     expect(await render(12.5, 'currency')).toEqual({
       text: '+R$ 12,50',
-      classes: 'text-emerald-700',
+      classes: 'text-gain',
     });
   });
 
   it('mostra valor negativo com - e na cor de perda', async () => {
     expect(await render(-12.5, 'currency')).toEqual({
       text: '-R$ 12,50',
-      classes: 'text-red-700',
+      classes: 'text-loss',
     });
   });
 
   it('mostra zero sem sinal e na cor neutra', async () => {
-    expect(await render(0, 'currency')).toEqual({ text: 'R$ 0,00', classes: 'text-slate-600' });
+    expect(await render(0, 'currency')).toEqual({ text: 'R$ 0,00', classes: 'text-ink-muted' });
   });
 
   it('formata percentual sem multiplicar por 100', async () => {

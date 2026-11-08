@@ -1,48 +1,77 @@
 <app-feed-panel title="Carteira" [hasData]="store.portfolio() !== null" [stale]="store.stale()">
   @if (store.portfolio(); as portfolio) {
-    <dl class="mb-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-      <div>
-        <dt class="text-xs text-slate-500">Conta</dt>
-        <dd class="font-semibold text-slate-900">{{ portfolio.accountId }}</dd>
-      </div>
-      <div>
-        <dt class="text-xs text-slate-500">Valor total</dt>
-        <dd class="font-semibold text-slate-900">{{ portfolio.totalMarketValue | currency }}</dd>
-      </div>
-      <div>
-        <dt class="text-xs text-slate-500">Resultado total</dt>
-        <dd class="font-semibold"><app-signed-value [value]="portfolio.totalUnrealizedPnl" /></dd>
-      </div>
-    </dl>
-    <div class="overflow-x-auto">
-      <table class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
-        <thead class="text-xs text-slate-500">
-          <tr>
-            <th scope="col" class="text-left">Ativo</th>
-            <th scope="col">Quantidade</th>
-            <th scope="col">Preço médio</th>
-            <th scope="col">Último</th>
-            <th scope="col">Valor de mercado</th>
-            <th scope="col">Resultado</th>
-            <th scope="col">Resultado %</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (position of portfolio.positions; track position.symbol) {
-            <tr class="border-t border-slate-100">
-              <th scope="row" class="text-left font-semibold text-slate-900">
-                {{ position.symbol }}
-              </th>
-              <td>{{ position.quantity | number }}</td>
-              <td>{{ position.averagePrice | currency }}</td>
-              <td>{{ position.lastPrice | currency }}</td>
-              <td>{{ position.marketValue | currency }}</td>
-              <td><app-signed-value [value]="position.unrealizedPnl" /></td>
-              <td><app-signed-value [value]="position.unrealizedPnlPercent" kind="percent" /></td>
-            </tr>
+    <div class="grid gap-6 xl:grid-cols-12">
+      @if (slices().length > 0) {
+        <div class="min-w-0 xl:col-span-4">
+          @if (chartFailed()) {
+            <p role="alert" class="mb-3 text-sm text-loss">
+              Não foi possível carregar o gráfico.
+            </p>
+          } @else {
+            <app-apex-chart
+              class="mx-auto h-55 max-w-64"
+              [options]="chartOptions()"
+              [series]="series()"
+              (loadFailed)="chartFailed.set(true)"
+            />
           }
-        </tbody>
-      </table>
+          <ul class="mt-4 space-y-2 text-sm">
+            @for (slice of slices(); track slice.label) {
+              <li class="flex items-center gap-3">
+                <span aria-hidden="true" class="size-2.5 rounded-full" [class]="slice.dot"></span>
+                <span class="flex-1 font-medium">{{ slice.label }}</span>
+                <span class="text-ink-muted">{{ slice.percent | number: '1.1-1' }}%</span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+      <div class="min-w-0" [class]="slices().length > 0 ? 'xl:col-span-8' : 'xl:col-span-12'">
+        <dl class="mb-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div>
+            <dt class="text-xs text-ink-muted">Conta</dt>
+            <dd class="font-semibold">{{ portfolio.accountId }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-ink-muted">Valor total</dt>
+            <dd class="font-semibold">{{ portfolio.totalMarketValue | currency }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-ink-muted">Resultado total</dt>
+            <dd class="font-semibold"><app-signed-value [value]="portfolio.totalUnrealizedPnl" /></dd>
+          </div>
+        </dl>
+        <div class="max-h-96 overflow-auto rounded-2xl">
+          <table
+            class="w-full text-right text-sm whitespace-nowrap [&_td]:px-3 [&_td]:py-3 [&_th]:px-3 [&_th]:py-3 [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-card-raised"
+          >
+            <thead class="text-xs text-ink-muted uppercase">
+              <tr>
+                <th scope="col" class="text-left">Ativo</th>
+                <th scope="col">Quantidade</th>
+                <th scope="col">Preço médio</th>
+                <th scope="col">Último</th>
+                <th scope="col">Valor de mercado</th>
+                <th scope="col">Resultado</th>
+                <th scope="col">Resultado %</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (position of portfolio.positions; track position.symbol) {
+                <tr class="border-t border-line">
+                  <th scope="row" class="text-left font-semibold">{{ position.symbol }}</th>
+                  <td>{{ position.quantity | number }}</td>
+                  <td>{{ position.averagePrice | currency }}</td>
+                  <td>{{ position.lastPrice | currency }}</td>
+                  <td>{{ position.marketValue | currency }}</td>
+                  <td><app-signed-value [value]="position.unrealizedPnl" /></td>
+                  <td><app-signed-value [value]="position.unrealizedPnlPercent" kind="percent" /></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   }
 </app-feed-panel>

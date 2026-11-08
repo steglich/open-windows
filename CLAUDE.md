@@ -46,7 +46,9 @@ The protocol contract (message shapes, channels, error codes) is specified in th
 - Messages go from socket to store through an RxJS `Subject`, not a signal, because a signal would drop all but the last message of a burst.
 - Every `welcome` redoes the subscriptions, since they do not survive a reconnection on the server.
 - `market-protocol.ts` copies the types from `apps/server/src/protocol.ts`, so change both together.
-- Components use only Tailwind utility classes. Specs use `FakeWebSocket` and the helpers in `market-data/testing/`.
+- Components use only Tailwind utility classes. Colors are tokens in `src/styles.css`: `@theme` holds the light values and `:root[data-theme="dark"]` overrides them, so do not use `dark:` variants. Chart colors repeat the tokens in `market/shared/chart-theme.ts`, so change both together. Specs use `FakeWebSocket` and the helpers in `market-data/testing/`.
+- ApexCharts is reached only through `app-apex-chart` (`market/shared/apex-chart/`), which loads it with a dynamic `import()` via `APEX_CHARTS_LOADER`. A static import would put about 950 kB in the initial bundle and break the 1 MB budget. Specs provide `FAKE_APEX_CHARTS_PROVIDERS`, since the library cannot render in jsdom.
+- Candles are requested with `getCandles` for the selected asset. `MarketStore` updates the in-progress candle from quotes and requests again when the minute turns.
 
 ## Spec-driven workflow (OpenSpec)
 

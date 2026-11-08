@@ -1,12 +1,58 @@
-<main class="mx-auto flex max-w-7xl flex-col gap-4 p-4">
-  <h1 class="text-2xl font-bold text-slate-900">{{ title() }}</h1>
+<div class="flex min-h-screen flex-col lg:flex-row">
+  <nav
+    aria-label="Seções da página"
+    class="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-sidebar px-4 py-3 lg:h-screen lg:w-22 lg:flex-col lg:gap-5 lg:border-r lg:border-b-0 lg:px-0 lg:py-6"
+  >
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      class="size-9 shrink-0 fill-none stroke-ink stroke-2 lg:mb-6"
+    >
+      <path d="M4 4h16v16H4zM12 4v16M4 12h16" stroke-linejoin="round" />
+    </svg>
+    @for (section of sections; track section.id) {
+      <a
+        [href]="'#' + section.id"
+        [attr.aria-label]="section.label"
+        [attr.title]="section.label"
+        [attr.aria-current]="activeSection() === section.id ? 'location' : null"
+        class="flex size-10 items-center justify-center rounded-xl transition-colors"
+        [class]="activeSection() === section.id ? 'bg-highlight text-highlight-ink' : 'text-ink-muted hover:text-ink'"
+        (click)="activeSection.set(section.id)"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5 fill-none stroke-current stroke-[1.8]"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path [attr.d]="section.icon" />
+        </svg>
+      </a>
+    }
+  </nav>
 
-  <app-connection-status-panel />
-  <app-quotes-panel />
-  <div class="grid gap-4 lg:grid-cols-2">
-    <app-order-book-panel />
-    <app-portfolio-panel />
-  </div>
-</main>
+  <main class="flex min-w-0 flex-1 flex-col gap-6 p-4 lg:p-6">
+    <header class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold text-ink sm:text-3xl">{{ title() }}</h1>
+        <p class="mt-1 text-sm text-ink-muted">Mercado simulado em tempo real</p>
+      </div>
+      <div class="flex items-start gap-3">
+        <app-connection-status-panel />
+        <app-theme-toggle />
+      </div>
+    </header>
+
+    <div id="visao-geral" class="grid scroll-mt-20 gap-6 xl:grid-cols-12">
+      <app-account-panel class="block min-w-0 xl:col-span-5" />
+      <app-price-chart-panel class="block min-w-0 xl:col-span-7" />
+    </div>
+    <app-quotes-panel id="cotacoes" class="block min-w-0 scroll-mt-20" />
+    <app-order-book-panel id="book" class="block min-w-0 scroll-mt-20" />
+    <app-portfolio-panel id="carteira" class="block min-w-0 scroll-mt-20" />
+  </main>
+</div>
 
 <router-outlet />
