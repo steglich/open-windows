@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { MarketStore } from '../../market-data/market-store';
 import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from '../../market-data/testing/in-process-market-connection';
 import {
   portfolio,
   PT_BR_PROVIDERS,
@@ -25,7 +26,7 @@ describe('PortfolioPanel', () => {
     FakeWebSocket.instances = [];
     FakeApexCharts.instances = [];
     TestBed.configureTestingModule({
-      providers: [...PT_BR_PROVIDERS, ...FAKE_APEX_CHARTS_PROVIDERS],
+      providers: [...PT_BR_PROVIDERS, ...FAKE_APEX_CHARTS_PROVIDERS, ...IN_PROCESS_MARKET_CONNECTION_PROVIDERS],
     });
     const store = TestBed.inject(MarketStore);
     fixture = TestBed.createComponent(PortfolioPanel);

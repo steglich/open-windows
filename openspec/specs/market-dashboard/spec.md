@@ -28,6 +28,10 @@ O painel de status SHALL mostrar em texto o estado atual da conexão e MUST most
 - **WHEN** existe um erro exposto com `code` e `message`
 - **THEN** o painel exibe o código e o texto do erro
 
+#### Scenario: Conexão indisponível no navegador
+- **WHEN** o estado da conexão é `unavailable`
+- **THEN** o painel indica que este navegador não permite a conexão com o mercado
+
 ### Requirement: Painel de cotações
 O painel de cotações SHALL listar uma linha por ativo, com último preço, variação, variação percentual, compra, venda, abertura, máxima, mínima, fechamento anterior e volume.
 

@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { MarketStore } from '../../market-data/market-store';
 import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from '../../market-data/testing/in-process-market-connection';
 import {
   accountMessage,
   PT_BR_PROVIDERS,
@@ -17,7 +18,7 @@ describe('AccountPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     FakeWebSocket.instances = [];
-    TestBed.configureTestingModule({ providers: PT_BR_PROVIDERS });
+    TestBed.configureTestingModule({ providers: [...PT_BR_PROVIDERS, ...IN_PROCESS_MARKET_CONNECTION_PROVIDERS] });
     const store = TestBed.inject(MarketStore);
     fixture = TestBed.createComponent(AccountPanel);
     socket = startConnected(store);

@@ -7,6 +7,7 @@ import {
   flushChartLoad,
 } from '../../market-data/testing/fake-apex-charts';
 import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from '../../market-data/testing/in-process-market-connection';
 import {
   answerCandles,
   candle,
@@ -39,7 +40,7 @@ describe('PriceChartPanel', () => {
   });
 
   function setUp(providers = FAKE_APEX_CHARTS_PROVIDERS): void {
-    TestBed.configureTestingModule({ providers: [...PT_BR_PROVIDERS, ...providers] });
+    TestBed.configureTestingModule({ providers: [...PT_BR_PROVIDERS, ...IN_PROCESS_MARKET_CONNECTION_PROVIDERS, ...providers] });
     store = TestBed.inject(MarketStore);
     fixture = TestBed.createComponent(PriceChartPanel);
     socket = startConnected(store);

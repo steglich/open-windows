@@ -8,6 +8,7 @@ const STATUS_DISPLAY: Record<ConnectionStatus, { label: string; tone: string; do
   connected: { label: 'Conectado', tone: 'text-gain', dot: 'bg-gain' },
   reconnecting: { label: 'Reconectando…', tone: 'text-warning', dot: 'bg-warning' },
   closed: { label: 'Desconectado', tone: 'text-loss', dot: 'bg-loss' },
+  unavailable: { label: 'Indisponível neste navegador', tone: 'text-loss', dot: 'bg-loss' },
 };
 
 @Component({

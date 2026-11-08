@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import type { ClientMessage } from './market-protocol';
 import { MarketStore } from './market-store';
 import { FakeWebSocket } from './testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from './testing/in-process-market-connection';
 import {
   account,
   accountMessage,
@@ -40,6 +41,7 @@ describe('MarketStore', () => {
     vi.useFakeTimers();
     vi.stubGlobal('WebSocket', FakeWebSocket);
     FakeWebSocket.instances = [];
+    TestBed.configureTestingModule({ providers: IN_PROCESS_MARKET_CONNECTION_PROVIDERS });
     store = TestBed.inject(MarketStore);
   });
 

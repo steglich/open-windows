@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 import { FAKE_APEX_CHARTS_PROVIDERS, FakeApexCharts } from './market-data/testing/fake-apex-charts';
 import { FakeWebSocket } from './market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from './market-data/testing/in-process-market-connection';
 
 describe('App', () => {
   beforeEach(async () => {
@@ -10,7 +11,7 @@ describe('App', () => {
     FakeApexCharts.instances = [];
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: FAKE_APEX_CHARTS_PROVIDERS,
+      providers: [...FAKE_APEX_CHARTS_PROVIDERS, ...IN_PROCESS_MARKET_CONNECTION_PROVIDERS],
     })
       .compileComponents();
   });

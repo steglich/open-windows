@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarketSocket } from '../../market-data/market-socket';
 import { MarketStore } from '../../market-data/market-store';
 import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from '../../market-data/testing/in-process-market-connection';
 import { startConnected, textOf } from '../../market-data/testing/market-fixtures';
 import { ConnectionStatusPanel } from './connection-status-panel';
 
@@ -13,6 +14,7 @@ describe('ConnectionStatusPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     FakeWebSocket.instances = [];
+    TestBed.configureTestingModule({ providers: IN_PROCESS_MARKET_CONNECTION_PROVIDERS });
     store = TestBed.inject(MarketStore);
     fixture = TestBed.createComponent(ConnectionStatusPanel);
   });
@@ -41,6 +43,17 @@ describe('ConnectionStatusPanel', () => {
     startConnected(store);
 
     expect(await text()).toContain('Conectado');
+  });
+
+  it('indica que a conexão está indisponível no navegador', async () => {
+    TestBed.resetTestingModule();
+    vi.stubGlobal('SharedWorker', undefined);
+    store = TestBed.inject(MarketStore);
+    fixture = TestBed.createComponent(ConnectionStatusPanel);
+
+    store.start();
+
+    expect(await text()).toContain('Indisponível neste navegador');
   });
 
   it('indica que está reconectando', async () => {

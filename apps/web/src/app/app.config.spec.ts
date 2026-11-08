@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { appConfig } from './app.config';
 import { FakeWebSocket } from './market-data/testing/fake-web-socket';
+import { IN_PROCESS_MARKET_CONNECTION_PROVIDERS } from './market-data/testing/in-process-market-connection';
 
 describe('appConfig', () => {
   beforeEach(() => {
@@ -16,7 +17,7 @@ describe('appConfig', () => {
   });
 
   it('abre uma única conexão ao iniciar a aplicação, sem depender dela para concluir', async () => {
-    TestBed.configureTestingModule({ providers: appConfig.providers });
+    TestBed.configureTestingModule({ providers: [...appConfig.providers, ...IN_PROCESS_MARKET_CONNECTION_PROVIDERS] });
 
     await TestBed.inject(ApplicationInitStatus).donePromise;
 
