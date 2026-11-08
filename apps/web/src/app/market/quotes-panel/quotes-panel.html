@@ -1,12 +1,25 @@
 <app-feed-panel
   title="Cotações"
+  variant="plain"
   [hasData]="store.quoteRows().length > 0"
   [stale]="store.stale()"
 >
   @if (store.quoteRows().length > 0) {
-    <div class="overflow-x-auto">
-      <table class="w-full text-right text-sm whitespace-nowrap [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
-        <thead class="text-xs text-slate-500">
+    <dl class="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      @for (item of summary(); track item.label) {
+        <div class="overflow-hidden rounded-2xl border border-line bg-card">
+          <dt class="px-4 py-2 text-sm font-medium" [class]="item.tone">
+            {{ item.label }}
+          </dt>
+          <dd class="px-4 py-3 text-3xl font-semibold text-ink">{{ item.count | number }}</dd>
+        </div>
+      }
+    </dl>
+    <div class="max-h-96 overflow-auto rounded-2xl border border-line bg-card">
+      <table
+        class="w-full text-right text-sm whitespace-nowrap [&_td]:px-3 [&_td]:py-3 [&_th]:px-3 [&_th]:py-3 [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-card-raised"
+      >
+        <thead class="text-xs text-ink-muted uppercase">
           <tr>
             <th scope="col" class="text-left">Ativo</th>
             <th scope="col">Último</th>
@@ -25,14 +38,14 @@
           @for (quote of store.quoteRows(); track quote.symbol) {
             <!-- O Enter no botão gera um click, que sobe até a linha. -->
             <tr
-              class="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-              [class.bg-sky-100]="quote.symbol === store.selectedSymbol()"
+              class="cursor-pointer border-t border-line hover:bg-card-raised"
+              [class.bg-selected]="quote.symbol === store.selectedSymbol()"
               (click)="store.select(quote.symbol)"
             >
               <th scope="row" class="text-left">
                 <button
                   type="button"
-                  class="cursor-pointer font-semibold text-slate-900"
+                  class="cursor-pointer font-semibold text-ink"
                   [attr.aria-pressed]="quote.symbol === store.selectedSymbol()"
                 >
                   {{ quote.symbol }}

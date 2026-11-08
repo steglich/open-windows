@@ -3,11 +3,24 @@
 <head>
   <meta charset="utf-8">
   <title>Open Windows Homebroker</title>
+  <script>
+    // Roda antes do bundle para a página não piscar no tema errado. A chave é a do ThemeStore.
+    (function () {
+      var theme;
+      try {
+        theme = localStorage.getItem('open-windows-theme');
+      } catch (error) {}
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
-<body class="bg-slate-100">
+<body class="bg-app text-ink">
   <app-root></app-root>
 </body>
 </html>

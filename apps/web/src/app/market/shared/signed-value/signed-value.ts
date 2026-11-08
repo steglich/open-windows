@@ -15,8 +15,8 @@ export class SignedValue {
   protected readonly tone = computed(() => {
     const value = this.value();
     if (value > 0) {
-      return 'text-emerald-700';
+      return 'text-gain';
     }
-    return value < 0 ? 'text-red-700' : 'text-slate-600';
+    return value < 0 ? 'text-loss' : 'text-ink-muted';
   });
 }

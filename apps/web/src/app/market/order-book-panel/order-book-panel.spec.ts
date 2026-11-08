@@ -42,6 +42,19 @@ describe('OrderBookPanel', () => {
     );
   }
 
+  it('destaca o melhor preço de cada lado e o spread', async () => {
+    socket.receive(bookMessage('ALFA3'));
+    await fixture.whenStable();
+
+    const best = Array.from(element().querySelectorAll('[data-testid="best-price"]')).map((item) =>
+      Array.from(item.children)
+        .map((part) => textOf(part).trim())
+        .join(' '),
+    );
+    expect(best).toEqual(['Melhor compra R$ 32,49', 'Melhor venda R$ 32,51']);
+    expect(textOf(element().querySelector('[data-testid="spread"]')!)).toContain('R$ 0,02');
+  });
+
   it('mostra o ativo selecionado e os dois lados na ordem recebida', async () => {
     socket.receive(bookMessage('ALFA3'));
     await fixture.whenStable();

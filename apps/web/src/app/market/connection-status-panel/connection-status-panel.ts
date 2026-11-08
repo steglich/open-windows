@@ -2,18 +2,16 @@ import { Component, computed, inject } from '@angular/core';
 
 import type { ConnectionStatus } from '../../market-data/market-socket';
 import { MarketStore } from '../../market-data/market-store';
-import { FeedPanel } from '../shared/feed-panel/feed-panel';
 
-const STATUS_DISPLAY: Record<ConnectionStatus, { label: string; tone: string }> = {
-  connecting: { label: 'Conectando…', tone: 'text-slate-600' },
-  connected: { label: 'Conectado', tone: 'text-emerald-700' },
-  reconnecting: { label: 'Reconectando…', tone: 'text-amber-700' },
-  closed: { label: 'Desconectado', tone: 'text-red-700' },
+const STATUS_DISPLAY: Record<ConnectionStatus, { label: string; tone: string; dot: string }> = {
+  connecting: { label: 'Conectando…', tone: 'text-ink-muted', dot: 'bg-ink-muted' },
+  connected: { label: 'Conectado', tone: 'text-gain', dot: 'bg-gain' },
+  reconnecting: { label: 'Reconectando…', tone: 'text-warning', dot: 'bg-warning' },
+  closed: { label: 'Desconectado', tone: 'text-loss', dot: 'bg-loss' },
 };
 
 @Component({
   selector: 'app-connection-status-panel',
-  imports: [FeedPanel],
   templateUrl: './connection-status-panel.html',
 })
 export class ConnectionStatusPanel {

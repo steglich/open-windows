@@ -3,7 +3,15 @@ import localePt from '@angular/common/locales/pt';
 import { DEFAULT_CURRENCY_CODE, LOCALE_ID, type Provider } from '@angular/core';
 
 import type { MarketStore } from '../market-store';
-import type { OrderBook, Portfolio, Quote, ServerMessage } from '../market-protocol';
+import type {
+  AccountBalance,
+  Candle,
+  GetCandlesMessage,
+  OrderBook,
+  Portfolio,
+  Quote,
+  ServerMessage,
+} from '../market-protocol';
 import { FakeWebSocket } from './fake-web-socket';
 
 registerLocaleData(localePt);
@@ -105,6 +113,57 @@ export function portfolio(overrides: Partial<Portfolio> = {}): Portfolio {
 
 export function positionsMessage(overrides: Partial<Portfolio> = {}): ServerMessage {
   return { type: 'positions', timestamp: 1, data: portfolio(overrides) };
+}
+
+export function account(overrides: Partial<AccountBalance> = {}): AccountBalance {
+  return {
+    accountId: 'SIM-0001',
+    availableBalance: 300,
+    blockedBalance: 200,
+    totalEquity: 1000,
+    ...overrides,
+  };
+}
+
+export function accountMessage(overrides: Partial<AccountBalance> = {}): ServerMessage {
+  return { type: 'account', timestamp: 1, data: account(overrides) };
+}
+
+export function candle(time: number, overrides: Partial<Candle> = {}): Candle {
+  return {
+    time,
+    open: 32,
+    high: 33,
+    low: 31.5,
+    close: 32.5,
+    volume: 1000,
+    financialVolume: 32_500,
+    ...overrides,
+  };
+}
+
+export function candlesMessage(
+  requestId: string,
+  symbol: string,
+  candles: Candle[],
+): ServerMessage {
+  return {
+    type: 'candles',
+    requestId,
+    timestamp: 1,
+    data: { symbol, interval: '1m', candles },
+  };
+}
+
+/** Consultas de candles enviadas pela conexão falsa, da mais antiga para a mais recente. */
+export function candleRequests(socket: FakeWebSocket): GetCandlesMessage[] {
+  return socket.sent.filter((message) => message.type === 'getCandles');
+}
+
+/** Responde à consulta de candles mais recente enviada pela conexão falsa. */
+export function answerCandles(socket: FakeWebSocket, candles: Candle[]): void {
+  const request = candleRequests(socket).at(-1) as GetCandlesMessage;
+  socket.receive(candlesMessage(request.requestId, request.symbol, candles));
 }
 
 /** Inicia o store e leva a conexão falsa até o `welcome`. */

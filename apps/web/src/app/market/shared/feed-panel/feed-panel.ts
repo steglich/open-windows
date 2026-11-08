@@ -7,6 +7,9 @@ import { Component, input } from '@angular/core';
 })
 export class FeedPanel {
   readonly title = input.required<string>();
+  readonly subtitle = input('');
   readonly hasData = input(false);
   readonly stale = input(false);
+  /** `plain` dispensa o fundo do card, para painéis que já são compostos de cards. */
+  readonly variant = input<'card' | 'plain'>('card');
 }

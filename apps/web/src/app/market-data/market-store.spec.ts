@@ -4,7 +4,13 @@ import type { ClientMessage } from './market-protocol';
 import { MarketStore } from './market-store';
 import { FakeWebSocket } from './testing/fake-web-socket';
 import {
+  account,
+  accountMessage,
+  answerCandles,
   bookMessage,
+  candle,
+  candleRequests,
+  candlesMessage,
   portfolio,
   positionsMessage,
   quote,
@@ -17,7 +23,14 @@ import {
 const BASE_SUBSCRIPTIONS: ClientMessage[] = [
   { type: 'subscribe', channel: 'quote' },
   { type: 'subscribe', channel: 'positions' },
+  { type: 'subscribe', channel: 'account' },
 ];
+
+function getCandles(requestId: string, symbol: string): ClientMessage {
+  return { type: 'getCandles', requestId, symbol, limit: 120 };
+}
+
+const MINUTE = 60_000;
 
 describe('MarketStore', () => {
   let store: MarketStore;
@@ -105,6 +118,186 @@ describe('MarketStore', () => {
 
       expect(store.book()?.symbol).toBe('ALFA3');
     });
+
+    it('substitui o saldo inteiro', () => {
+      const socket = startConnected(store);
+      socket.receive(accountMessage());
+
+      socket.receive(accountMessage({ totalEquity: 2000 }));
+
+      expect(store.account()).toEqual(account({ totalEquity: 2000 }));
+    });
+
+    it('expõe a cotação do ativo selecionado', () => {
+      const socket = startConnected(store);
+      socket.receive(quoteMessage('BETA4', { last: 41 }));
+      expect(store.selectedQuote()).toBeNull();
+
+      store.select('BETA4');
+
+      expect(store.selectedQuote()).toEqual(quote('BETA4', { last: 41 }));
+    });
+  });
+
+  describe('candles do ativo selecionado', () => {
+    it('consulta os candles após as assinaturas do welcome', () => {
+      const socket = startConnected(store);
+
+      expect(socket.sent.at(-1)).toEqual(getCandles('candles-1', 'ALFA3'));
+    });
+
+    it('troca de ativo descarta os candles e consulta o novo', () => {
+      const socket = startConnected(store);
+      answerCandles(socket, [candle(MINUTE)]);
+      socket.sent = [];
+
+      store.select('BETA4');
+
+      expect(store.candles()).toBeNull();
+      expect(socket.sent).toEqual([
+        { type: 'unsubscribe', channel: 'book', symbols: ['ALFA3'] },
+        { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        getCandles('candles-2', 'BETA4'),
+      ]);
+    });
+
+    it('sem conexão, deixa a consulta para o próximo welcome', () => {
+      const socket = startConnected(store);
+      socket.drop();
+      socket.sent = [];
+
+      store.select('BETA4');
+      expect(socket.sent).toEqual([]);
+
+      expect(candleRequests(reconnect()).map(({ symbol }) => symbol)).toEqual(['BETA4']);
+    });
+
+    it('aplica somente a resposta da consulta mais recente', () => {
+      const socket = startConnected(store);
+      store.select('BETA4');
+
+      socket.receive(candlesMessage('candles-1', 'ALFA3', [candle(MINUTE)]));
+      expect(store.candles()).toBeNull();
+
+      const candles = [candle(MINUTE, { close: 40 })];
+      socket.receive(candlesMessage('candles-2', 'BETA4', candles));
+      expect(store.candles()).toEqual(candles);
+    });
+
+    it('mantém os candles ao reconectar até a nova resposta', () => {
+      const first = startConnected(store);
+      answerCandles(first, [candle(MINUTE)]);
+      first.drop();
+
+      const second = reconnect();
+      expect(store.candles()).toEqual([candle(MINUTE)]);
+
+      answerCandles(second, [candle(2 * MINUTE)]);
+      expect(store.candles()).toEqual([candle(2 * MINUTE)]);
+    });
+
+    it('descarta a resposta de uma consulta anterior à queda', () => {
+      const first = startConnected(store);
+      first.drop();
+
+      const second = reconnect();
+
+      second.receive(candlesMessage('candles-1', 'ALFA3', [candle(MINUTE)]));
+      expect(store.candles()).toBeNull();
+    });
+
+    describe('candle em andamento', () => {
+      function connectedWithCandles(): FakeWebSocket {
+        const socket = startConnected(store);
+        answerCandles(socket, [candle(0), candle(MINUTE, { high: 33, low: 31.5 })]);
+        return socket;
+      }
+
+      it('atualiza fechamento e máxima sem mudar os demais candles', () => {
+        const socket = connectedWithCandles();
+        const previous = store.candles()?.[0];
+
+        socket.receive(quoteMessage('ALFA3', { last: 33.5, updatedAt: MINUTE + 500 }));
+
+        expect(store.candles()?.[0]).toBe(previous);
+        expect(store.candles()?.[1]).toEqual(
+          candle(MINUTE, { close: 33.5, high: 33.5, low: 31.5 }),
+        );
+      });
+
+      it('atualiza fechamento e mínima', () => {
+        const socket = connectedWithCandles();
+
+        socket.receive(quoteMessage('ALFA3', { last: 31, updatedAt: MINUTE + 500 }));
+
+        expect(store.candles()?.[1]).toEqual(candle(MINUTE, { close: 31, high: 33, low: 31 }));
+      });
+
+      it('mantém o mesmo array quando a cotação não muda o candle', () => {
+        const socket = connectedWithCandles();
+        const before = store.candles();
+
+        socket.receive(quoteMessage('ALFA3', { last: 32.5, updatedAt: MINUTE + 500 }));
+
+        expect(store.candles()).toBe(before);
+      });
+
+      it('ignora cotação de outro ativo', () => {
+        const socket = connectedWithCandles();
+        const before = store.candles();
+
+        socket.receive(quoteMessage('BETA4', { last: 99, updatedAt: MINUTE + 500 }));
+
+        expect(store.candles()).toBe(before);
+      });
+
+      it('ignora cotação de um minuto anterior', () => {
+        const socket = connectedWithCandles();
+        const before = store.candles();
+
+        socket.receive(quoteMessage('ALFA3', { last: 99, updatedAt: 500 }));
+
+        expect(store.candles()).toBe(before);
+      });
+
+      it('reconsulta na virada do minuto mantendo os candles atuais', () => {
+        const socket = connectedWithCandles();
+        const before = store.candles();
+        socket.sent = [];
+
+        socket.receive(quoteMessage('ALFA3', { last: 40, updatedAt: 2 * MINUTE }));
+
+        expect(socket.sent).toEqual([getCandles('candles-2', 'ALFA3')]);
+        expect(store.candles()).toBe(before);
+      });
+
+      it('não duplica a consulta enquanto uma estiver pendente', () => {
+        const socket = connectedWithCandles();
+        socket.sent = [];
+
+        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE }));
+        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE + 500 }));
+
+        expect(socket.sent).toHaveLength(1);
+      });
+
+      it('libera nova consulta depois do erro da consulta pendente', () => {
+        const socket = connectedWithCandles();
+        socket.sent = [];
+        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE }));
+
+        socket.receive({
+          type: 'error',
+          code: 'UNKNOWN_SYMBOL',
+          message: 'Ativo desconhecido.',
+          requestId: 'candles-2',
+        });
+        expect(store.lastError()?.code).toBe('UNKNOWN_SYMBOL');
+
+        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE + 500 }));
+        expect(socket.sent).toHaveLength(2);
+      });
+    });
   });
 
   describe('queda da conexão', () => {
@@ -125,13 +318,14 @@ describe('MarketStore', () => {
   });
 
   describe('assinaturas', () => {
-    it('assina quote, positions e somente o book do ativo selecionado', () => {
+    it('assina quote, positions, account e somente o book do ativo selecionado', () => {
       const socket = startConnected(store);
 
       expect(store.selectedSymbol()).toBe('ALFA3');
       expect(socket.sent).toEqual([
         ...BASE_SUBSCRIPTIONS,
         { type: 'subscribe', channel: 'book', symbols: ['ALFA3'] },
+        getCandles('candles-1', 'ALFA3'),
       ]);
     });
 
@@ -146,6 +340,7 @@ describe('MarketStore', () => {
       expect(second.sent).toEqual([
         ...BASE_SUBSCRIPTIONS,
         { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        getCandles('candles-3', 'BETA4'),
       ]);
     });
 
@@ -179,6 +374,7 @@ describe('MarketStore', () => {
       expect(socket.sent).toEqual([
         { type: 'unsubscribe', channel: 'book', symbols: ['ALFA3'] },
         { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        getCandles('candles-2', 'BETA4'),
       ]);
       expect(store.book()).toBeNull();
     });
