@@ -59,6 +59,17 @@ describe('parseClientMessage', () => {
     });
   });
 
+  it('aceita o canal candle com e sem symbols', () => {
+    expect(parse({ type: 'subscribe', channel: 'candle', symbols: ['PETR4'] })).toEqual({
+      ok: true,
+      message: { type: 'subscribe', channel: 'candle', symbols: ['PETR4'] },
+    });
+    expect(parse({ type: 'subscribe', channel: 'candle' })).toEqual({
+      ok: true,
+      message: { type: 'subscribe', channel: 'candle' },
+    });
+  });
+
   it('rejeita o envio de ordem como tipo desconhecido', () => {
     expect(parse({ type: 'placeOrder', symbol: 'PETR4', quantity: 100 })).toMatchObject({
       ok: false,

@@ -8,6 +8,7 @@ import { buildAccountBalance, buildPortfolio } from './market/portfolio.js';
 import { randomSeed } from './market/random.js';
 import { MarketSimulator } from './market/simulator.js';
 import type { SimulationVolume } from './market/volume.js';
+import { ChannelPacer } from './pacing.js';
 import {
   CHANNELS,
   parseClientMessage,
@@ -24,6 +25,18 @@ export const SIMULATED_START_TIME = Date.parse('2026-01-05T16:00:00-03:00');
 
 const POSITIONS_EVERY_TICKS = 2;
 const MAX_MESSAGE_BYTES = 16 * 1024;
+const PACE_INTERVAL_MS = 10;
+/** Acima disso, a conexão não acompanha o fluxo e deixa de receber as mensagens contínuas. */
+const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+
+const CONTINUOUS_CHANNELS = ['quote', 'book', 'candle'] as const;
+
+type ContinuousChannel = (typeof CONTINUOUS_CHANNELS)[number];
+
+/** Mensagens por segundo de cada canal contínuo, por conexão. Zero desliga o envio. */
+export type ChannelRates = Record<ContinuousChannel, number>;
+
+export const DEFAULT_CHANNEL_RATES: ChannelRates = { quote: 500, book: 1000, candle: 350 };
 
 export interface GatewayOptions {
   port: number;
@@ -32,6 +45,7 @@ export interface GatewayOptions {
   /** Com seed, dados e timestamps se repetem. Sem seed, usa o relógio real. */
   seed?: number;
   volume?: Partial<SimulationVolume>;
+  rates?: Partial<ChannelRates>;
 }
 
 export interface Gateway {
@@ -44,8 +58,10 @@ interface Client {
   socket: WebSocket;
   quote: Set<string>;
   book: Set<string>;
+  candle: Set<string>;
   positions: boolean;
   account: boolean;
+  pacers: Record<ContinuousChannel, ChannelPacer>;
 }
 
 export async function startGateway({
@@ -54,12 +70,17 @@ export async function startGateway({
   tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
   seed,
   volume,
+  rates,
 }: GatewayOptions): Promise<Gateway> {
+  const channelRates = { ...DEFAULT_CHANNEL_RATES, ...rates };
   const usesSimulatedClock = seed !== undefined;
   const resolvedSeed = seed ?? randomSeed();
   const startTime = usesSimulatedClock ? SIMULATED_START_TIME : Date.now();
   let simulatedNow = startTime;
   const now = (): number => (usesSimulatedClock ? simulatedNow : Date.now());
+  const monotonicNow = (): number => performance.now();
+  let cycleAt = startTime;
+  const cycleFrames = new Map<string, string>();
 
   const simulator = new MarketSimulator({ seed: resolvedSeed, startTime, volume });
   const account = generateAccount({
@@ -97,16 +118,24 @@ export async function startGateway({
     }
   }
 
-  function quotesMessage(symbols: readonly string[]): ServerMessage {
+  function quotesMessage(symbols: readonly string[], timestamp = now()): ServerMessage {
     return {
       type: 'quotes',
-      timestamp: now(),
+      timestamp,
       data: symbols.map((symbol) => simulator.quote(symbol)),
     };
   }
 
-  function bookMessage(symbol: string): ServerMessage {
-    return { type: 'book', timestamp: now(), data: simulator.book(symbol) };
+  function bookMessage(symbol: string, timestamp = now()): ServerMessage {
+    return { type: 'book', timestamp, data: simulator.book(symbol) };
+  }
+
+  function candleMessage(symbol: string, timestamp = now()): ServerMessage {
+    return {
+      type: 'candle',
+      timestamp,
+      data: { symbol, interval: '1m', candle: simulator.candles(symbol, 1)[0]! },
+    };
   }
 
   function positionsMessage(): ServerMessage {
@@ -135,12 +164,21 @@ export async function startGateway({
 
     const requested = symbols ?? simulator.symbols;
     requested.forEach((symbol) => client[channel].add(symbol));
+    updateRotation(client, channel);
     send(client, { type: 'subscribed', channel, symbols: requested });
     if (channel === 'quote') {
       send(client, quotesMessage(requested));
-    } else {
+    } else if (channel === 'book') {
       requested.forEach((symbol) => send(client, bookMessage(symbol)));
+    } else {
+      requested.forEach((symbol) => send(client, candleMessage(symbol)));
     }
+  }
+
+  function updateRotation(client: Client, channel: ContinuousChannel): void {
+    client.pacers[channel].setSymbols(
+      simulator.symbols.filter((symbol) => client[channel].has(symbol)),
+    );
   }
 
   function unsubscribe(client: Client, { channel, symbols }: SubscriptionMessage): void {
@@ -152,6 +190,7 @@ export async function startGateway({
 
     const requested = symbols ?? simulator.symbols;
     requested.forEach((symbol) => client[channel].delete(symbol));
+    updateRotation(client, channel);
     send(client, { type: 'unsubscribed', channel, symbols: requested });
   }
 
@@ -206,8 +245,14 @@ export async function startGateway({
       socket,
       quote: new Set(),
       book: new Set(),
+      candle: new Set(),
       positions: false,
       account: false,
+      pacers: {
+        quote: new ChannelPacer(channelRates.quote, monotonicNow),
+        book: new ChannelPacer(channelRates.book, monotonicNow),
+        candle: new ChannelPacer(channelRates.candle, monotonicNow),
+      },
     };
     clients.add(client);
 
@@ -229,39 +274,49 @@ export async function startGateway({
     send(client, { type: 'welcome', channels: CHANNELS, symbols: simulator.symbols });
   });
 
-  /** Um frame por cliente e por ciclo: em lote, o navegador processa tudo em uma única tarefa. */
-  function publishQuotes(): void {
-    let fullFrame: string | undefined;
-    for (const client of clients) {
-      if (client.quote.size === simulator.symbols.length) {
-        fullFrame ??= JSON.stringify(quotesMessage(simulator.symbols));
-        sendFrame(client, fullFrame);
-      } else if (client.quote.size > 0) {
-        send(client, quotesMessage(simulator.symbols.filter((symbol) => client.quote.has(symbol))));
-      }
+  function continuousMessage(channel: ContinuousChannel, symbol: string): ServerMessage {
+    switch (channel) {
+      case 'quote':
+        return quotesMessage([symbol], cycleAt);
+      case 'book':
+        return bookMessage(symbol, cycleAt);
+      case 'candle':
+        return candleMessage(symbol, cycleAt);
     }
   }
 
-  function publishBooks(): void {
-    for (const symbol of simulator.symbols) {
-      broadcast(
-        (client) => client.book.has(symbol),
-        () => bookMessage(symbol),
-      );
+  /** Serializa cada item uma vez por ciclo, já que entre os ciclos o estado não muda. */
+  function continuousFrame(channel: ContinuousChannel, symbol: string): string {
+    const key = `${channel}:${symbol}`;
+    let frame = cycleFrames.get(key);
+    if (frame === undefined) {
+      frame = JSON.stringify(continuousMessage(channel, symbol));
+      cycleFrames.set(key, frame);
+    }
+    return frame;
+  }
+
+  function publishContinuous(): void {
+    for (const client of clients) {
+      const blocked = client.socket.bufferedAmount > MAX_BUFFERED_BYTES;
+      for (const channel of CONTINUOUS_CHANNELS) {
+        for (const symbol of client.pacers[channel].take(blocked)) {
+          sendFrame(client, continuousFrame(channel, symbol));
+        }
+      }
     }
   }
 
   let tickCount = 0;
 
-  function publishCycle(): void {
+  function advanceMarket(): void {
     if (usesSimulatedClock) {
       simulatedNow += tickIntervalMs;
     }
-    simulator.tick(now());
+    cycleAt = now();
+    simulator.tick(cycleAt);
+    cycleFrames.clear();
     tickCount++;
-
-    publishQuotes();
-    publishBooks();
 
     if (tickCount % POSITIONS_EVERY_TICKS === 0) {
       broadcast((client) => client.positions, positionsMessage);
@@ -269,13 +324,15 @@ export async function startGateway({
     }
   }
 
-  const timer = setInterval(publishCycle, tickIntervalMs);
+  const marketTimer = setInterval(advanceMarket, tickIntervalMs);
+  const paceTimer = setInterval(publishContinuous, PACE_INTERVAL_MS);
 
   return {
     port: (server.address() as AddressInfo).port,
     seed: resolvedSeed,
     close() {
-      clearInterval(timer);
+      clearInterval(marketTimer);
+      clearInterval(paceTimer);
       for (const { socket } of clients) {
         socket.terminate();
       }

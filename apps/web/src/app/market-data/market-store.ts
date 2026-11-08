@@ -18,7 +18,18 @@ export interface MarketError {
 }
 
 const CANDLE_LIMIT = 120;
-const MINUTE_MS = 60_000;
+
+function sameCandle(a: Candle, b: Candle): boolean {
+  return (
+    a.time === b.time &&
+    a.open === b.open &&
+    a.high === b.high &&
+    a.low === b.low &&
+    a.close === b.close &&
+    a.volume === b.volume &&
+    a.financialVolume === b.financialVolume
+  );
+}
 
 /** Estado em tempo real do mercado. Os componentes apenas leem estes signals. */
 @Injectable({ providedIn: 'root' })
@@ -78,8 +89,14 @@ export class MarketStore {
     }
     if (previous !== null) {
       this.socket.send({ type: 'unsubscribe', channel: 'book', symbols: [previous] });
+      this.socket.send({ type: 'unsubscribe', channel: 'candle', symbols: [previous] });
     }
+    this.subscribeSelected(symbol);
+  }
+
+  private subscribeSelected(symbol: string): void {
     this.socket.send({ type: 'subscribe', channel: 'book', symbols: [symbol] });
+    this.socket.send({ type: 'subscribe', channel: 'candle', symbols: [symbol] });
     this.requestCandles(symbol);
   }
 
@@ -120,6 +137,11 @@ export class MarketStore {
           this.bookState.set(message.data);
         }
         break;
+      case 'candle':
+        if (message.data.symbol === this.selectedSymbolState()) {
+          this.applyCandle(message.data.symbol, message.data.candle);
+        }
+        break;
       case 'positions':
         this.portfolioState.set(message.data);
         break;
@@ -147,37 +169,24 @@ export class MarketStore {
       }
       return updated;
     });
-
-    const selected = this.selectedSymbolState();
-    const quote = batch.find(({ symbol }) => symbol === selected);
-    if (quote !== undefined) {
-      this.applyQuoteToCandles(quote);
-    }
   }
 
-  /** O servidor fecha o candle pelo mesmo relógio de `updatedAt`, então os minutos coincidem. */
-  private applyQuoteToCandles(quote: Quote): void {
+  /** Um candle igual ao atual mantém o array, para o gráfico não redesenhar sem motivo. */
+  private applyCandle(symbol: string, candle: Candle): void {
     const candles = this.candlesState();
     const current = candles?.at(-1);
     if (candles === null || current === undefined) {
       return;
     }
 
-    const minute = Math.floor(quote.updatedAt / MINUTE_MS) * MINUTE_MS;
-    if (minute > current.time) {
+    if (candle.time > current.time) {
       if (this.pendingCandlesRequestId === null) {
-        this.requestCandles(quote.symbol);
+        this.requestCandles(symbol);
       }
       return;
     }
-    if (minute < current.time) {
-      return;
-    }
-
-    const high = Math.max(current.high, quote.last);
-    const low = Math.min(current.low, quote.last);
-    if (quote.last !== current.close || high !== current.high || low !== current.low) {
-      this.candlesState.set([...candles.slice(0, -1), { ...current, close: quote.last, high, low }]);
+    if (candle.time === current.time && !sameCandle(candle, current)) {
+      this.candlesState.set([...candles.slice(0, -1), candle]);
     }
   }
 
@@ -196,8 +205,7 @@ export class MarketStore {
     this.socket.send({ type: 'subscribe', channel: 'positions' });
     this.socket.send({ type: 'subscribe', channel: 'account' });
     if (selected !== null) {
-      this.socket.send({ type: 'subscribe', channel: 'book', symbols: [selected] });
-      this.requestCandles(selected);
+      this.subscribeSelected(selected);
     }
   }
 }

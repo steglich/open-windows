@@ -32,12 +32,12 @@ TypeScript is pinned to `~6.0.3` in both apps because Angular 22.2 requires `>=6
 
 The protocol contract (message shapes, channels, error codes) is specified in the OpenSpec specs, typed in `apps/server/src/protocol.ts`, and documented field by field in `apps/server/PROTOCOL.md`.
 
-- A single `MarketSimulator` holds all market state, and `gateway.ts` advances it in one 500 ms cycle. Each cycle publishes one `quotes` batch per client, then the books, and every second cycle positions then account. Quotes, book, positions, and account are consistent only because they share this state and order, so do not add per-channel timers.
-- Candles and orders are answered on request (`getCandles`, `getOrders`) and correlated by `requestId`. Everything else that changes on its own is a channel.
+- A single `MarketSimulator` holds all market state, and `gateway.ts` advances it in one 500 ms cycle, publishing positions then account every second cycle. A single 10 ms timer sends `quote`, `book`, and `candle` continuously to each client at `DEFAULT_CHANNEL_RATES`, one asset per message in rotation (`pacing.ts`). Quote and book agree when they share the cycle `timestamp`, not by send order, so do not add per-channel timers.
+- Candle history and orders are answered on request (`getCandles`, `getOrders`) and correlated by `requestId`. Everything else that changes on its own is a channel.
 - The quote state is derived from the current session's candles in `market/history.ts`, and positions are replayed from the fills generated in `market/orders.ts`. Keep those derivations: they are what make the sections agree with each other.
 - Reproducibility depends on RNG consumption not varying with subscriptions. `tick` draws a fixed amount per asset, and book levels come from a per-asset, per-cycle sub-seed (`deriveSeed`) computed on demand.
 - Prices are integer cents internally and are converted to reais only when building messages (`centsToReais`). Keep arithmetic in cents.
-- `startGateway` takes the port, cycle interval, seed, and volume as options. With a seed, all timestamps come from a simulated clock. Tests use port `0`, short cycles, a seed, a reduced `volume`, and real WebSocket clients (`TestClient` in `src/test-utils.ts`).
+- `startGateway` takes the port, cycle interval, seed, volume, and channel rates as options. With a seed, all timestamps come from a simulated clock. Tests use port `0`, short cycles, a seed, a reduced `volume`, explicit `rates` (`0` turns a channel off), and real WebSocket clients (`TestClient` in `src/test-utils.ts`).
 - `tsconfig.json` excludes `*.test.ts` and `test-utils.ts`, so `pnpm build` does not type-check tests.
 
 ## Web architecture
@@ -48,7 +48,8 @@ The protocol contract (message shapes, channels, error codes) is specified in th
 - `market-protocol.ts` copies the types from `apps/server/src/protocol.ts`, so change both together.
 - Components use only Tailwind utility classes. Colors are tokens in `src/styles.css`: `@theme` holds the light values and `:root[data-theme="dark"]` overrides them, so do not use `dark:` variants. Chart colors repeat the tokens in `market/shared/chart-theme.ts`, so change both together. Specs use `FakeWebSocket` and the helpers in `market-data/testing/`.
 - ApexCharts is reached only through `app-apex-chart` (`market/shared/apex-chart/`), which loads it with a dynamic `import()` via `APEX_CHARTS_LOADER`. A static import would put about 950 kB in the initial bundle and break the 1 MB budget. Specs provide `FAKE_APEX_CHARTS_PROVIDERS`, since the library cannot render in jsdom.
-- Candles are requested with `getCandles` for the selected asset. `MarketStore` updates the in-progress candle from quotes and requests again when the minute turns.
+- Candle history is requested with `getCandles` for the selected asset. `MarketStore` replaces the in-progress candle from the `candle` channel and requests again when the minute turns.
+- `MarketStore` applies each message to the signals as soon as it arrives, so do not add a time-based aggregator.
 
 ## Spec-driven workflow (OpenSpec)
 

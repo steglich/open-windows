@@ -80,6 +80,15 @@ describe('MarketSocket', () => {
         data: { symbol: 'PETR4', interval: '1m', candles: [] },
       },
       { type: 'orders', requestId: 'b', timestamp: 1, data: { items: [], total: 0, offset: 0, limit: 100 } },
+      {
+        type: 'candle',
+        timestamp: 1,
+        data: {
+          symbol: 'PETR4',
+          interval: '1m',
+          candle: { time: 0, open: 1, high: 2, low: 1, close: 2, volume: 10, financialVolume: 20 },
+        },
+      },
     ])('aceita mensagens $type', (message) => {
       const received: ServerMessage[] = [];
       socket.messages.subscribe((value) => received.push(value));

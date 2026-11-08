@@ -23,6 +23,7 @@ const SERVER_MESSAGE_TYPES: ReadonlySet<unknown> = new Set<ServerMessage['type']
   'error',
   'quotes',
   'book',
+  'candle',
   'positions',
   'account',
   'candles',

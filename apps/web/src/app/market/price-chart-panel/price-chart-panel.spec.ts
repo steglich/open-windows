@@ -10,6 +10,7 @@ import { FakeWebSocket } from '../../market-data/testing/fake-web-socket';
 import {
   answerCandles,
   candle,
+  candleMessage,
   PT_BR_PROVIDERS,
   quoteMessage,
   startConnected,
@@ -78,7 +79,7 @@ describe('PriceChartPanel', () => {
     answerCandles(socket, [candle(0), candle(MINUTE)]);
     await settle();
 
-    socket.receive(quoteMessage('ALFA3', { last: 40, updatedAt: MINUTE + 500 }));
+    socket.receive(candleMessage('ALFA3', candle(MINUTE, { close: 40, high: 40 })));
     await settle();
 
     expect(FakeApexCharts.instances).toHaveLength(1);
@@ -86,6 +87,17 @@ describe('PriceChartPanel', () => {
     const data = (update.series as { data: { y: number[] }[] }[])[0].data;
     expect(data[1].y).toEqual([32, 40, 31.5, 40]);
     expect(data[0].y).toEqual([32, 33, 31.5, 32.5]);
+  });
+
+  it('mantém os candles do gráfico ao receber somente uma cotação', async () => {
+    setUp();
+    answerCandles(socket, [candle(0), candle(MINUTE)]);
+    await settle();
+
+    socket.receive(quoteMessage('ALFA3', { last: 40, updatedAt: MINUTE + 500 }));
+    await settle();
+
+    expect(FakeApexCharts.last.seriesUpdates).toHaveLength(0);
   });
 
   it('troca as cores dos candles com o tema sem recriar o gráfico', async () => {

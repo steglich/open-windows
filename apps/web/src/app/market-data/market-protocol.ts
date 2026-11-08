@@ -1,6 +1,6 @@
 // Cópia dos tipos de apps/server/src/protocol.ts. Mantenha os dois arquivos alinhados.
 
-export type Channel = 'quote' | 'book' | 'positions' | 'account';
+export type Channel = 'quote' | 'book' | 'candle' | 'positions' | 'account';
 
 export interface Quote {
   symbol: string;
@@ -108,6 +108,7 @@ export type ServerMessage =
   | { type: 'error'; code: ErrorCode; message: string; requestId?: string }
   | { type: 'quotes'; timestamp: number; data: Quote[] }
   | { type: 'book'; timestamp: number; data: OrderBook }
+  | { type: 'candle'; timestamp: number; data: { symbol: string; interval: '1m'; candle: Candle } }
   | { type: 'positions'; timestamp: number; data: Portfolio }
   | { type: 'account'; timestamp: number; data: AccountBalance }
   | {

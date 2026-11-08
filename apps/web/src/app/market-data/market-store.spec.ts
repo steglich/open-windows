@@ -9,6 +9,7 @@ import {
   answerCandles,
   bookMessage,
   candle,
+  candleMessage,
   candleRequests,
   candlesMessage,
   portfolio,
@@ -119,6 +120,16 @@ describe('MarketStore', () => {
       expect(store.book()?.symbol).toBe('ALFA3');
     });
 
+    it('aplica cada book assim que ele chega', () => {
+      const socket = startConnected(store);
+
+      socket.receive(bookMessage('ALFA3', { spread: 0.1 }));
+      expect(store.book()?.spread).toBe(0.1);
+
+      socket.receive(bookMessage('ALFA3', { spread: 0.2 }));
+      expect(store.book()?.spread).toBe(0.2);
+    });
+
     it('substitui o saldo inteiro', () => {
       const socket = startConnected(store);
       socket.receive(accountMessage());
@@ -156,7 +167,9 @@ describe('MarketStore', () => {
       expect(store.candles()).toBeNull();
       expect(socket.sent).toEqual([
         { type: 'unsubscribe', channel: 'book', symbols: ['ALFA3'] },
+        { type: 'unsubscribe', channel: 'candle', symbols: ['ALFA3'] },
         { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        { type: 'subscribe', channel: 'candle', symbols: ['BETA4'] },
         getCandles('candles-2', 'BETA4'),
       ]);
     });
@@ -213,49 +226,70 @@ describe('MarketStore', () => {
         return socket;
       }
 
-      it('atualiza fechamento e máxima sem mudar os demais candles', () => {
+      it('substitui o candle em andamento sem mudar os demais', () => {
         const socket = connectedWithCandles();
         const previous = store.candles()?.[0];
+        const updated = candle(MINUTE, { close: 33.5, high: 33.5, low: 31.5, volume: 2000 });
 
-        socket.receive(quoteMessage('ALFA3', { last: 33.5, updatedAt: MINUTE + 500 }));
+        socket.receive(candleMessage('ALFA3', updated));
 
         expect(store.candles()?.[0]).toBe(previous);
-        expect(store.candles()?.[1]).toEqual(
-          candle(MINUTE, { close: 33.5, high: 33.5, low: 31.5 }),
-        );
+        expect(store.candles()?.[1]).toEqual(updated);
       });
 
-      it('atualiza fechamento e mínima', () => {
+      it('aplica cada candle assim que ele chega', () => {
         const socket = connectedWithCandles();
 
-        socket.receive(quoteMessage('ALFA3', { last: 31, updatedAt: MINUTE + 500 }));
+        socket.receive(candleMessage('ALFA3', candle(MINUTE, { close: 32.6 })));
+        expect(store.candles()?.[1]?.close).toBe(32.6);
 
-        expect(store.candles()?.[1]).toEqual(candle(MINUTE, { close: 31, high: 33, low: 31 }));
+        socket.receive(candleMessage('ALFA3', candle(MINUTE, { close: 32.7 })));
+        expect(store.candles()?.[1]?.close).toBe(32.7);
       });
 
-      it('mantém o mesmo array quando a cotação não muda o candle', () => {
+      it('mantém o mesmo array quando o candle recebido é igual ao atual', () => {
         const socket = connectedWithCandles();
         const before = store.candles();
 
-        socket.receive(quoteMessage('ALFA3', { last: 32.5, updatedAt: MINUTE + 500 }));
+        socket.receive(candleMessage('ALFA3', candle(MINUTE, { high: 33, low: 31.5 })));
 
         expect(store.candles()).toBe(before);
       });
 
-      it('ignora cotação de outro ativo', () => {
+      it('não altera os candles ao receber uma cotação', () => {
         const socket = connectedWithCandles();
         const before = store.candles();
 
-        socket.receive(quoteMessage('BETA4', { last: 99, updatedAt: MINUTE + 500 }));
+        socket.receive(quoteMessage('ALFA3', { last: 99, updatedAt: MINUTE + 500 }));
 
         expect(store.candles()).toBe(before);
       });
 
-      it('ignora cotação de um minuto anterior', () => {
+      it('ignora candle de outro ativo', () => {
         const socket = connectedWithCandles();
         const before = store.candles();
 
-        socket.receive(quoteMessage('ALFA3', { last: 99, updatedAt: 500 }));
+        socket.receive(candleMessage('BETA4', candle(MINUTE, { close: 99, high: 99 })));
+
+        expect(store.candles()).toBe(before);
+      });
+
+      it('ignora candle de um minuto anterior', () => {
+        const socket = connectedWithCandles();
+        const before = store.candles();
+
+        socket.receive(candleMessage('ALFA3', candle(0, { close: 99, high: 99 })));
+
+        expect(store.candles()).toBe(before);
+      });
+
+      it('descarta candle atrasado do ativo anterior', () => {
+        const socket = connectedWithCandles();
+        store.select('BETA4');
+        answerCandles(socket, [candle(MINUTE)]);
+        const before = store.candles();
+
+        socket.receive(candleMessage('ALFA3', candle(MINUTE, { close: 99, high: 99 })));
 
         expect(store.candles()).toBe(before);
       });
@@ -265,7 +299,7 @@ describe('MarketStore', () => {
         const before = store.candles();
         socket.sent = [];
 
-        socket.receive(quoteMessage('ALFA3', { last: 40, updatedAt: 2 * MINUTE }));
+        socket.receive(candleMessage('ALFA3', candle(2 * MINUTE, { close: 40 })));
 
         expect(socket.sent).toEqual([getCandles('candles-2', 'ALFA3')]);
         expect(store.candles()).toBe(before);
@@ -275,8 +309,8 @@ describe('MarketStore', () => {
         const socket = connectedWithCandles();
         socket.sent = [];
 
-        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE }));
-        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE + 500 }));
+        socket.receive(candleMessage('ALFA3', candle(2 * MINUTE)));
+        socket.receive(candleMessage('ALFA3', candle(2 * MINUTE, { close: 33 })));
 
         expect(socket.sent).toHaveLength(1);
       });
@@ -284,7 +318,7 @@ describe('MarketStore', () => {
       it('libera nova consulta depois do erro da consulta pendente', () => {
         const socket = connectedWithCandles();
         socket.sent = [];
-        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE }));
+        socket.receive(candleMessage('ALFA3', candle(2 * MINUTE)));
 
         socket.receive({
           type: 'error',
@@ -294,7 +328,7 @@ describe('MarketStore', () => {
         });
         expect(store.lastError()?.code).toBe('UNKNOWN_SYMBOL');
 
-        socket.receive(quoteMessage('ALFA3', { updatedAt: 2 * MINUTE + 500 }));
+        socket.receive(candleMessage('ALFA3', candle(2 * MINUTE, { close: 33 })));
         expect(socket.sent).toHaveLength(2);
       });
     });
@@ -318,13 +352,14 @@ describe('MarketStore', () => {
   });
 
   describe('assinaturas', () => {
-    it('assina quote, positions, account e somente o book do ativo selecionado', () => {
+    it('assina quote, positions, account e somente book e candle do ativo selecionado', () => {
       const socket = startConnected(store);
 
       expect(store.selectedSymbol()).toBe('ALFA3');
       expect(socket.sent).toEqual([
         ...BASE_SUBSCRIPTIONS,
         { type: 'subscribe', channel: 'book', symbols: ['ALFA3'] },
+        { type: 'subscribe', channel: 'candle', symbols: ['ALFA3'] },
         getCandles('candles-1', 'ALFA3'),
       ]);
     });
@@ -340,6 +375,7 @@ describe('MarketStore', () => {
       expect(second.sent).toEqual([
         ...BASE_SUBSCRIPTIONS,
         { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        { type: 'subscribe', channel: 'candle', symbols: ['BETA4'] },
         getCandles('candles-3', 'BETA4'),
       ]);
     });
@@ -364,7 +400,7 @@ describe('MarketStore', () => {
   });
 
   describe('troca do ativo selecionado', () => {
-    it('cancela o book anterior, assina o novo e limpa o book até o novo chegar', () => {
+    it('cancela book e candle anteriores, assina os novos e limpa o book até o novo chegar', () => {
       const socket = startConnected(store);
       socket.receive(bookMessage('ALFA3'));
       socket.sent = [];
@@ -373,7 +409,9 @@ describe('MarketStore', () => {
 
       expect(socket.sent).toEqual([
         { type: 'unsubscribe', channel: 'book', symbols: ['ALFA3'] },
+        { type: 'unsubscribe', channel: 'candle', symbols: ['ALFA3'] },
         { type: 'subscribe', channel: 'book', symbols: ['BETA4'] },
+        { type: 'subscribe', channel: 'candle', symbols: ['BETA4'] },
         getCandles('candles-2', 'BETA4'),
       ]);
       expect(store.book()).toBeNull();

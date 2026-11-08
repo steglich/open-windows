@@ -29,10 +29,26 @@ Com `SEED`, dados e timestamps se repetem a cada execução, pois o relógio sim
 Ao conectar, o servidor envia:
 
 ```json
-{ "type": "welcome", "channels": ["quote", "book", "positions", "account"], "symbols": ["PETR4", "VALE3"] }
+{ "type": "welcome", "channels": ["quote", "book", "candle", "positions", "account"], "symbols": ["PETR4", "VALE3"] }
 ```
 
-A cada 500 ms, o servidor avança o mercado e publica, nesta ordem, `quotes`, `book` e, a cada dois ciclos, `positions` e `account`.
+## Publicação
+
+A cada 500 ms, o servidor avança o mercado e, a cada dois ciclos, publica `positions` e depois `account`.
+
+Os canais `quote`, `book` e `candle` são contínuos: por conexão e por canal, o servidor envia uma quantidade fixa de mensagens por segundo, espaçadas ao longo do segundo, seja qual for a quantidade de ativos assinados.
+
+| Canal | Mensagens por segundo |
+| --- | --- |
+| `book` | 1000 |
+| `quote` | 500 |
+| `candle` | 350 |
+
+Cada mensagem traz um único ativo, em rodízio entre os assinados. Como o mercado só muda a cada ciclo, mensagens enviadas entre dois ciclos repetem o estado mais recente.
+
+O `timestamp` das mensagens contínuas é o instante do ciclo que as gerou. Uma cotação e um book do mesmo ativo com o mesmo `timestamp` têm as mesmas melhores ofertas. Mensagens com `timestamp` diferente podem divergir até chegar uma do mesmo ciclo.
+
+Enquanto houver mais de 8 MiB pendentes de entrega a uma conexão, o servidor não envia a ela mensagens contínuas e não as acumula. Ao se recuperar, a conexão volta a receber o estado mais recente. `positions`, `account`, confirmações e respostas a consultas continuam sendo enviadas.
 
 ## Canais
 
@@ -43,11 +59,11 @@ A cada 500 ms, o servidor avança o mercado e publica, nesta ordem, `quotes`, `b
 { "type": "unsubscribe", "channel": "quote", "symbols": ["PETR4"] }
 ```
 
-Nos canais `quote` e `book`, a ausência de `symbols` significa todos os ativos. Nos canais `positions` e `account`, `symbols` é ignorado. O servidor confirma com `subscribed` ou `unsubscribed` (`channel`, `symbols`) e, na assinatura, envia o estado atual em seguida. As assinaturas valem por conexão.
+Nos canais `quote`, `book` e `candle`, a ausência de `symbols` significa todos os ativos. Nos canais `positions` e `account`, `symbols` é ignorado. O servidor confirma com `subscribed` ou `unsubscribed` (`channel`, `symbols`) e, na assinatura, envia o estado atual em seguida. As assinaturas valem por conexão.
 
 ### `quote`: mensagem `quotes`
 
-Um frame por ciclo e por cliente, com todos os ativos assinados: `{ "type": "quotes", "timestamp": n, "data": [Quote] }`.
+`{ "type": "quotes", "timestamp": n, "data": [Quote] }`. Nas mensagens contínuas, `data` tem uma única cotação. Só a mensagem de estado inicial, enviada na assinatura, traz todos os ativos da assinatura.
 
 | Campo de `Quote` | Tipo | Descrição |
 | --- | --- | --- |
@@ -64,7 +80,7 @@ Um frame por ciclo e por cliente, com todos os ativos assinados: `{ "type": "quo
 
 ### `book`: mensagem `book`
 
-Uma por ativo assinado e por ciclo: `{ "type": "book", "timestamp": n, "data": OrderBook }`.
+`{ "type": "book", "timestamp": n, "data": OrderBook }`, com o book completo de um ativo.
 
 | Campo de `OrderBook` | Tipo | Descrição |
 | --- | --- | --- |
@@ -74,6 +90,10 @@ Uma por ativo assinado e por ciclo: `{ "type": "book", "timestamp": n, "data": O
 | `asks` | `BookLevel[]` | Vendas, do menor para o maior preço |
 
 Cada `BookLevel` tem `price`, `quantity` (total agregado no preço) e `orders`.
+
+### `candle`: mensagem `candle`
+
+O candle de 1 minuto em andamento de um ativo: `{ "type": "candle", "timestamp": n, "data": { "symbol": "PETR4", "interval": "1m", "candle": Candle } }`. Os campos de `Candle` são os mesmos de `getCandles`. Quando o minuto vira, a mensagem passa a trazer o candle do novo minuto. Para o histórico, use `getCandles`.
 
 ### `positions`: mensagem `positions`
 

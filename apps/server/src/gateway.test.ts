@@ -3,9 +3,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_CHANNEL_RATES,
   DEFAULT_TICK_INTERVAL_MS,
   SIMULATED_START_TIME,
   startGateway,
+  type ChannelRates,
   type Gateway,
   type GatewayOptions,
 } from './gateway.js';
@@ -13,6 +15,11 @@ import { TestClient, type ReceivedMessage } from './test-utils.js';
 
 const NEVER_TICKS_MS = 3_600_000;
 const FAST_TICK_MS = 5;
+/** Tempo suficiente para o envio contínuo alcançar todos os ativos em cada ciclo. */
+const SEED_TICK_MS = 20;
+const NO_RATES: ChannelRates = { quote: 0, book: 0, candle: 0 };
+const FAST_RATES: ChannelRates = { quote: 1000, book: 1000, candle: 1000 };
+const SEED_RATES: ChannelRates = { quote: 2000, book: 2000, candle: 2000 };
 const VOLUME = { assets: 12, bookDepth: 5, orders: 400, positions: 5, sessions: 2 };
 const SESSION_CANDLES = 390;
 const CURRENT_CANDLES = 120;
@@ -27,14 +34,15 @@ async function launch(options: Partial<GatewayOptions>): Promise<Gateway> {
     host: '127.0.0.1',
     tickIntervalMs: NEVER_TICKS_MS,
     volume: VOLUME,
+    rates: NO_RATES,
     ...options,
   });
   gateways.push(started);
   return started;
 }
 
-async function start(tickIntervalMs: number): Promise<void> {
-  gateway = await launch({ tickIntervalMs, seed: 11 });
+async function start(tickIntervalMs: number, rates: ChannelRates = NO_RATES): Promise<void> {
+  gateway = await launch({ tickIntervalMs, seed: 11, rates });
 }
 
 /** Conecta um cliente e consome o `welcome`. */
@@ -88,12 +96,12 @@ describe('conexão e protocolo', () => {
     const welcome = await client.waitFor(() => true);
 
     expect(welcome.type).toBe('welcome');
-    expect(welcome.channels).toEqual(['quote', 'book', 'positions', 'account']);
+    expect(welcome.channels).toEqual(['quote', 'book', 'candle', 'positions', 'account']);
     expect(welcome.symbols).toHaveLength(VOLUME.assets);
   });
 
   it('não envia dados sem assinatura', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
 
     await delay(FAST_TICK_MS * 10);
@@ -131,22 +139,20 @@ describe('conexão e protocolo', () => {
   });
 
   it('acumula assinaturas e publica apenas os ativos assinados', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
 
     await subscribe(client, 'quote', ['PETR4']);
     await subscribe(client, 'quote', ['VALE3']);
     await client.collect(20, isType('quotes'));
 
-    const last = client.messages.filter(isType('quotes')).at(-1)!;
-    expect(last.data.map(({ symbol }: ReceivedMessage) => symbol).sort()).toEqual([
-      'PETR4',
-      'VALE3',
-    ]);
+    const recent = client.messages.filter(isType('quotes')).slice(-4);
+    expect(recent.every(({ data }) => data.length === 1)).toBe(true);
+    expect(new Set(recent.map(({ data }) => data[0].symbol))).toEqual(new Set(['PETR4', 'VALE3']));
   });
 
   it('cancela um ativo e mantém os demais', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote', ['PETR4', 'VALE3']);
 
@@ -158,7 +164,7 @@ describe('conexão e protocolo', () => {
   });
 
   it('cancela o canal inteiro', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'positions');
     await client.waitForType('positions');
@@ -202,7 +208,7 @@ describe('mensagens inválidas', () => {
   });
 
   it('não assina nenhum ativo de uma lista com ativo desconhecido', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
 
     client.send({ type: 'subscribe', channel: 'quote', symbols: ['PETR4', 'XPTO9'] });
@@ -213,7 +219,7 @@ describe('mensagens inválidas', () => {
   });
 
   it('mantém as assinaturas existentes após um erro', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote', ['PETR4']);
 
@@ -224,7 +230,7 @@ describe('mensagens inválidas', () => {
   });
 
   it('fecha apenas a conexão que excede o limite de tamanho', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const offender = await connect();
     const other = await connect();
     await subscribe(other, 'quote', ['PETR4']);
@@ -237,42 +243,87 @@ describe('mensagens inválidas', () => {
 });
 
 describe('publicação', () => {
-  it('publica a cotação antes do book e com as mesmas melhores ofertas', async () => {
-    await start(FAST_TICK_MS);
+  it('mantém as melhores ofertas iguais em cotação e book do mesmo ciclo', async () => {
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote', ['PETR4']);
     await subscribe(client, 'book', ['PETR4']);
 
-    await client.collect(20, isType('book'));
+    await client.collect(50, isType('book'));
 
-    let lastQuote: ReceivedMessage | undefined;
-    for (const message of client.messages) {
-      if (message.type === 'quotes') {
-        lastQuote = quoteOf(message, 'PETR4');
-      } else if (message.type === 'book' && lastQuote) {
-        expect(message.data.bids[0].price).toBe(lastQuote.bid);
-        expect(message.data.asks[0].price).toBe(lastQuote.ask);
-        expect(message.data.spread).toBeCloseTo(lastQuote.ask - lastQuote.bid, 2);
+    const quotesByCycle = new Map(
+      client.messages
+        .filter(isType('quotes'))
+        .map((message) => [message.timestamp, quoteOf(message, 'PETR4')!]),
+    );
+    let compared = 0;
+    for (const message of client.messages.filter(isType('book'))) {
+      const quote = quotesByCycle.get(message.timestamp);
+      if (quote) {
+        expect(message.data.bids[0].price).toBe(quote.bid);
+        expect(message.data.asks[0].price).toBe(quote.ask);
+        expect(message.data.spread).toBeCloseTo(quote.ask - quote.bid, 2);
+        compared++;
       }
     }
-    expect(lastQuote).toBeDefined();
+    expect(compared).toBeGreaterThan(0);
   });
 
-  it('envia um único lote por ciclo com todos os ativos', async () => {
-    await start(FAST_TICK_MS);
+  it('envia uma cotação por mensagem, em rodízio entre os ativos', async () => {
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote');
+    await client.waitForType('quotes');
 
-    const batches = await client.collect(5, isType('quotes'));
+    const messages = await client.collect(VOLUME.assets * 2, isType('quotes'));
 
-    for (const { data } of batches) {
-      expect(data).toHaveLength(VOLUME.assets);
+    expect(messages.every(({ data }) => data.length === 1)).toBe(true);
+    expect(new Set(messages.map(({ data }) => data[0].symbol)).size).toBe(VOLUME.assets);
+  });
+
+  it('usa o instante do ciclo como timestamp das mensagens contínuas', async () => {
+    gateway = await launch({ tickIntervalMs: FAST_TICK_MS, rates: FAST_RATES });
+    const client = await connect();
+    await subscribe(client, 'quote', ['PETR4']);
+    await client.waitForType('quotes');
+
+    const messages = await client.collect(20, isType('quotes'));
+
+    for (const { timestamp, data } of messages) {
+      expect(data[0].updatedAt).toBe(timestamp);
     }
-    expect(new Set(batches.map(({ timestamp }) => timestamp)).size).toBe(batches.length);
+  });
+
+  it('usa por padrão as taxas definidas para cada canal', () => {
+    expect(DEFAULT_CHANNEL_RATES).toEqual({ book: 1000, quote: 500, candle: 350 });
+  });
+
+  it('mantém a taxa configurada de cada canal', { timeout: 10_000 }, async () => {
+    const windowMs = 2_000;
+    gateway = await launch({ seed: 11, tickIntervalMs: 500, rates: DEFAULT_CHANNEL_RATES });
+    const client = await connect();
+    await subscribe(client, 'quote', ['PETR4']);
+    await subscribe(client, 'book', ['PETR4']);
+    await subscribe(client, 'candle', ['PETR4']);
+    const start = client.messages.length;
+
+    await delay(windowMs);
+
+    const received = client.messages.slice(start);
+    for (const [type, rate] of [
+      ['quotes', DEFAULT_CHANNEL_RATES.quote],
+      ['book', DEFAULT_CHANNEL_RATES.book],
+      ['candle', DEFAULT_CHANNEL_RATES.candle],
+    ] as const) {
+      const expected = (rate * windowMs) / 1000;
+      const count = received.filter(isType(type)).length;
+      expect(count).toBeGreaterThanOrEqual(expected * 0.9);
+      expect(count).toBeLessThanOrEqual(expected * 1.1);
+    }
   });
 
   it('mantém updatedAt até o timestamp da mensagem', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote');
 
@@ -286,29 +337,34 @@ describe('publicação', () => {
   });
 
   it('avalia as posições pelo último preço publicado', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'quote');
     await subscribe(client, 'positions');
 
-    await client.collect(10, isType('positions'));
+    await client.collect(30, isType('positions'));
 
-    const lastBySymbol = new Map<string, number>();
-    for (const message of client.messages) {
-      if (message.type === 'quotes') {
-        for (const { symbol, last } of message.data) {
-          lastBySymbol.set(symbol, last);
-        }
-      } else if (message.type === 'positions') {
-        for (const { symbol, lastPrice } of message.data.positions) {
-          expect(lastPrice).toBe(lastBySymbol.get(symbol));
+    const lastByCycle = new Map<string, number>();
+    for (const { timestamp, data } of client.messages.filter(isType('quotes'))) {
+      for (const { symbol, last } of data) {
+        lastByCycle.set(`${timestamp}:${symbol}`, last);
+      }
+    }
+    let compared = 0;
+    for (const { timestamp, data } of client.messages.filter(isType('positions'))) {
+      for (const { symbol, lastPrice } of data.positions) {
+        const last = lastByCycle.get(`${timestamp}:${symbol}`);
+        if (last !== undefined) {
+          expect(lastPrice).toBe(last);
+          compared++;
         }
       }
     }
+    expect(compared).toBeGreaterThan(0);
   });
 
   it('publica o saldo depois das posições, com o patrimônio do mesmo ciclo', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'positions');
     await subscribe(client, 'account');
@@ -334,7 +390,7 @@ describe('publicação', () => {
   });
 
   it('envia o saldo imediatamente na assinatura e cancela o canal', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'account');
     await client.waitForType('account');
@@ -348,16 +404,15 @@ describe('publicação', () => {
   });
 
   it('publica posições a cada dois ciclos', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
-    await subscribe(client, 'quote', ['PETR4']);
     await subscribe(client, 'positions');
+    await client.waitForType('positions');
 
-    await client.collect(41, isType('quotes'));
-    const count = client.messages.filter(isType('positions')).length;
+    const messages = await client.collect(10, isType('positions'));
 
-    expect(count).toBeGreaterThanOrEqual(18);
-    expect(count).toBeLessThanOrEqual(23);
+    const gaps = messages.slice(1).map(({ timestamp }, index) => timestamp - messages[index]!.timestamp);
+    expect(new Set(gaps)).toEqual(new Set([2 * FAST_TICK_MS]));
   });
 
   it('usa um ciclo padrão que atende às frequências mínimas', async () => {
@@ -379,7 +434,7 @@ describe('publicação', () => {
   });
 
   it('continua publicando depois que outro cliente desconecta', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const leaving = await connect();
     const staying = await connect();
     await subscribe(leaving, 'quote', ['PETR4']);
@@ -392,7 +447,7 @@ describe('publicação', () => {
   });
 
   it('isola as assinaturas por conexão', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const first = await connect();
     const second = await connect();
     await subscribe(first, 'quote', ['PETR4']);
@@ -405,6 +460,89 @@ describe('publicação', () => {
 
     expect(a.every(({ data }) => data.length === 1 && data[0].symbol === 'PETR4')).toBe(true);
     expect(b.every(({ data }) => data.length === 1 && data[0].symbol === 'VALE3')).toBe(true);
+  });
+});
+
+describe('canal candle', () => {
+  it('confirma a assinatura e envia o candle em andamento em seguida', async () => {
+    await start(NEVER_TICKS_MS);
+    const client = await connect();
+
+    client.send({ type: 'subscribe', channel: 'candle', symbols: ['PETR4'] });
+
+    expect(await client.waitFor(() => true)).toEqual({
+      type: 'subscribed',
+      channel: 'candle',
+      symbols: ['PETR4'],
+    });
+    const message = await client.waitFor(() => true);
+    expect(message.type).toBe('candle');
+    expect(message.data.symbol).toBe('PETR4');
+    expect(message.data.interval).toBe('1m');
+
+    client.send({ type: 'getCandles', requestId: 'last', symbol: 'PETR4', limit: 1 });
+    const { data } = await client.waitFor(isResponse('last'));
+    expect(message.data.candle).toEqual(data.candles[0]);
+  });
+
+  it('envia um candle por ativo ao assinar todos', async () => {
+    await start(NEVER_TICKS_MS);
+    const client = await TestClient.connect(gateway!.port);
+    clients.push(client);
+    const { symbols } = await client.waitForType('welcome');
+
+    client.send({ type: 'subscribe', channel: 'candle' });
+    const messages = await client.collect(symbols.length, isType('candle'));
+
+    expect(messages.map(({ data }) => data.symbol).sort()).toEqual([...symbols].sort());
+  });
+
+  it('publica somente os ativos assinados', async () => {
+    await start(FAST_TICK_MS, FAST_RATES);
+    const client = await connect();
+    await subscribe(client, 'candle', ['VALE3']);
+
+    const messages = await client.collect(20, isType('candle'));
+
+    expect(messages.every(({ data }) => data.symbol === 'VALE3')).toBe(true);
+  });
+
+  it('para de publicar ao cancelar a assinatura', async () => {
+    await start(FAST_TICK_MS, FAST_RATES);
+    const client = await connect();
+    await subscribe(client, 'candle', ['VALE3']);
+    await client.collect(5, isType('candle'));
+
+    client.send({ type: 'unsubscribe', channel: 'candle' });
+    await client.waitForType('unsubscribed');
+    const received = client.messages.length;
+    await delay(FAST_TICK_MS * 10);
+
+    expect(client.messages.length).toBe(received);
+  });
+
+  it('mantém o fechamento igual ao último preço da cotação do mesmo ciclo', async () => {
+    await start(FAST_TICK_MS, FAST_RATES);
+    const client = await connect();
+    await subscribe(client, 'quote', ['PETR4']);
+    await subscribe(client, 'candle', ['PETR4']);
+
+    await client.collect(50, isType('candle'));
+
+    const quotesByCycle = new Map(
+      client.messages
+        .filter(isType('quotes'))
+        .map((message) => [message.timestamp, quoteOf(message, 'PETR4')!]),
+    );
+    let compared = 0;
+    for (const { timestamp, data } of client.messages.filter(isType('candle'))) {
+      const quote = quotesByCycle.get(timestamp);
+      if (quote) {
+        expect(data.candle.close).toBe(quote.last);
+        compared++;
+      }
+    }
+    expect(compared).toBeGreaterThan(0);
   });
 });
 
@@ -468,16 +606,15 @@ describe('consultas', () => {
   it('atualiza o candle em andamento com os ciclos', async () => {
     await start(FAST_TICK_MS);
     const client = await connect();
-    await subscribe(client, 'quote', ['PETR4']);
-    await client.collect(5, isType('quotes'));
+    client.send({ type: 'getCandles', requestId: 'first', symbol: 'PETR4', limit: 1 });
+    const first = await client.waitFor(isResponse('first'));
+    await delay(FAST_TICK_MS * 20);
 
-    client.send({ type: 'getCandles', requestId: 'live', symbol: 'PETR4', limit: 1 });
-    const response = await client.waitFor(isResponse('live'));
+    client.send({ type: 'getCandles', requestId: 'later', symbol: 'PETR4', limit: 1 });
+    const later = await client.waitFor(isResponse('later'));
 
-    const before = client.messages.filter(isType('quotes')).findLast(
-      ({ timestamp }) => timestamp <= response.timestamp,
-    )!;
-    expect(response.data.candles[0].close).toBe(quoteOf(before, 'PETR4')!.last);
+    expect(later.timestamp).toBeGreaterThan(first.timestamp);
+    expect(later.data.candles[0].volume).toBeGreaterThan(first.data.candles[0].volume);
   });
 
   it('responde ordens com paginação, filtros e total', async () => {
@@ -503,7 +640,7 @@ describe('consultas', () => {
   });
 
   it('mantém as ordens iguais depois de vários ciclos', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
 
     client.send({ type: 'getOrders', requestId: 'before', limit: 50 });
@@ -612,7 +749,7 @@ describe('coerência entre seções', () => {
   });
 
   it('mantém o saldo disponível e o bloqueado constantes', async () => {
-    await start(FAST_TICK_MS);
+    await start(FAST_TICK_MS, FAST_RATES);
     const client = await connect();
     await subscribe(client, 'account');
 
@@ -624,49 +761,58 @@ describe('coerência entre seções', () => {
 });
 
 describe('seed', () => {
-  /** Mensagens de cada ciclo, indexadas pelo timestamp do relógio simulado. */
-  function byCycle(client: TestClient, type: string): Map<number, ReceivedMessage> {
-    return new Map(
-      client.messages.filter(isType(type)).map((message) => [message.timestamp, message]),
-    );
+  /** Dados de cada ativo em cada ciclo, indexados pelo timestamp do relógio simulado. */
+  function byCycle(client: TestClient, type: string): Map<string, ReceivedMessage> {
+    const items = new Map<string, ReceivedMessage>();
+    for (const message of client.messages.filter(isType(type))) {
+      if (type === 'quotes') {
+        for (const quote of message.data) {
+          items.set(`${message.timestamp}:${quote.symbol}`, quote);
+        }
+      } else {
+        items.set(`${message.timestamp}:${message.data.symbol ?? ''}`, message);
+      }
+    }
+    return items;
   }
 
   function expectSameCycles(a: TestClient, b: TestClient, type: string): void {
     const first = byCycle(a, type);
     const second = byCycle(b, type);
     let compared = 0;
-    for (const [timestamp, message] of first) {
-      const other = second.get(timestamp);
+    for (const [key, item] of first) {
+      const other = second.get(key);
       if (other) {
-        expect(other).toEqual(message);
+        expect(other).toEqual(item);
         compared++;
       }
     }
     expect(compared).toBeGreaterThan(0);
   }
 
-  it('reproduz as mensagens de cada ciclo com a mesma seed', async () => {
-    const first = await launch({ seed: 42, tickIntervalMs: FAST_TICK_MS });
-    const second = await launch({ seed: 42, tickIntervalMs: FAST_TICK_MS });
+  it('reproduz os dados de cada ativo e ciclo com a mesma seed', async () => {
+    const first = await launch({ seed: 42, tickIntervalMs: SEED_TICK_MS, rates: SEED_RATES });
+    const second = await launch({ seed: 42, tickIntervalMs: SEED_TICK_MS, rates: SEED_RATES });
     const a = await connect(first);
     const b = await connect(second);
 
     for (const client of [a, b]) {
       await subscribe(client, 'quote');
       await subscribe(client, 'book', ['PETR4']);
+      await subscribe(client, 'candle', ['PETR4']);
       await subscribe(client, 'positions');
       await subscribe(client, 'account');
     }
     await Promise.all([a, b].map((client) => client.collect(10, isType('account'))));
 
-    for (const type of ['quotes', 'book', 'positions', 'account']) {
+    for (const type of ['quotes', 'book', 'candle', 'positions', 'account']) {
       expectSameCycles(a, b, type);
     }
   });
 
   it('não muda as cotações conforme as assinaturas do cliente', async () => {
-    const first = await launch({ seed: 42, tickIntervalMs: FAST_TICK_MS });
-    const second = await launch({ seed: 42, tickIntervalMs: FAST_TICK_MS });
+    const first = await launch({ seed: 42, tickIntervalMs: SEED_TICK_MS, rates: SEED_RATES });
+    const second = await launch({ seed: 42, tickIntervalMs: SEED_TICK_MS, rates: SEED_RATES });
     const withBooks = await connect(first);
     const withoutBooks = await connect(second);
 
@@ -674,7 +820,7 @@ describe('seed', () => {
     await subscribe(withBooks, 'quote');
     await subscribe(withoutBooks, 'quote');
     await Promise.all(
-      [withBooks, withoutBooks].map((client) => client.collect(20, isType('quotes'))),
+      [withBooks, withoutBooks].map((client) => client.collect(400, isType('quotes'))),
     );
 
     expectSameCycles(withBooks, withoutBooks, 'quotes');
@@ -732,6 +878,7 @@ describe('volume padrão', () => {
       host: '127.0.0.1',
       tickIntervalMs: NEVER_TICKS_MS,
       seed: 1,
+      rates: NO_RATES,
     });
     gateways.push(target);
     const startupMs = performance.now() - startedAt;

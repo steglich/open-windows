@@ -29,7 +29,7 @@ export function textOf(element: Element): string {
 }
 
 export function welcome(symbols: readonly string[] = SYMBOLS): ServerMessage {
-  return { type: 'welcome', channels: ['quote', 'book', 'positions', 'account'], symbols };
+  return { type: 'welcome', channels: ['quote', 'book', 'candle', 'positions', 'account'], symbols };
 }
 
 export function quote(symbol: string, overrides: Partial<Quote> = {}): Quote {
@@ -153,6 +153,10 @@ export function candlesMessage(
     timestamp: 1,
     data: { symbol, interval: '1m', candles },
   };
+}
+
+export function candleMessage(symbol: string, value: Candle): ServerMessage {
+  return { type: 'candle', timestamp: 1, data: { symbol, interval: '1m', candle: value } };
 }
 
 /** Consultas de candles enviadas pela conexão falsa, da mais antiga para a mais recente. */
