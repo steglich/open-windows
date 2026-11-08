@@ -50,6 +50,20 @@ describe('UpstreamSocket', () => {
     expect(order).toEqual(['connecting', 'connected', 'welcome']);
   });
 
+  it('passa ao listener o texto original do frame', () => {
+    const frames: string[] = [];
+    socket = new UpstreamSocket('ws://teste', {
+      onStatus: () => undefined,
+      onMessage: (_message, frame) => frames.push(frame),
+    });
+    const current = connectAndWelcome();
+    const frame = JSON.stringify(SUBSCRIBED, null, 2);
+
+    current.receiveFrame(frame);
+
+    expect(frames).toEqual([JSON.stringify(WELCOME), frame]);
+  });
+
   describe('frames inválidos', () => {
     it.each([
       ['JSON malformado', 'isto não é json'],

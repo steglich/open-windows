@@ -10,4 +10,6 @@ export type TabToWorkerMessage =
 
 export type WorkerToTabMessage =
   | { type: 'status'; status: ConnectionStatus }
-  | { type: 'message'; message: ServerMessage };
+  | { type: 'message'; message: ServerMessage }
+  /** Texto original do servidor. Até o próximo quadro, um `frame` substitui o de mesma `key`; `null` nunca substitui. */
+  | { type: 'frame'; frame: string; key: string | null };

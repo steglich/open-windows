@@ -1,6 +1,15 @@
 import type { ClientMessage, ServerMessage } from '../market-protocol';
 import { FakeWebSocket } from '../testing/fake-web-socket';
-import { book, quote, welcome } from '../testing/market-fixtures';
+import {
+  accountMessage,
+  book,
+  candle,
+  candleMessage,
+  positionsMessage,
+  quote,
+  quoteMessage,
+  welcome,
+} from '../testing/market-fixtures';
 import { MarketHub } from './market-hub';
 import type { ConnectionStatus, TabToWorkerMessage, WorkerToTabMessage } from './worker-messages';
 
@@ -34,7 +43,16 @@ class FakeTab {
   }
 
   get messages(): ServerMessage[] {
-    return this.posts.flatMap((post) => (post.type === 'message' ? [post.message] : []));
+    return this.posts.flatMap((post) => {
+      if (post.type === 'message') {
+        return [post.message];
+      }
+      return post.type === 'frame' ? [JSON.parse(post.frame) as ServerMessage] : [];
+    });
+  }
+
+  get frames(): Extract<WorkerToTabMessage, { type: 'frame' }>[] {
+    return this.posts.flatMap((post) => (post.type === 'frame' ? [post] : []));
   }
 
   clear(): void {
@@ -157,6 +175,79 @@ describe('MarketHub', () => {
       subscribeBook(first, 'ALFA3');
 
       expect(FakeWebSocket.last.sent).toEqual([]);
+    });
+  });
+
+  describe('frame original', () => {
+    it('entrega o book com o texto exato do servidor, só a quem assinou', () => {
+      const { socket, first, second } = twoTabs();
+      subscribeBook(first, 'ALFA3');
+      first.clear();
+      second.clear();
+      const frame = JSON.stringify({ type: 'book', timestamp: 1, data: book('ALFA3') }, null, 1);
+
+      socket.receiveFrame(frame);
+
+      expect(first.frames).toEqual([{ type: 'frame', frame, key: 'book:ALFA3' }]);
+      expect(second.posts).toEqual([]);
+    });
+
+    it('não dá chave de substituição aos candles', () => {
+      const { socket, first } = connected();
+      first.send({ type: 'subscribe', channel: 'candle', symbols: ['ALFA3'] });
+      first.clear();
+      const message = candleMessage('ALFA3', candle(60_000));
+
+      socket.receive(message);
+
+      expect(first.frames).toEqual([{ type: 'frame', frame: JSON.stringify(message), key: null }]);
+    });
+
+    it('usa o canal como chave em positions e account', () => {
+      const { socket, first } = connected();
+      first.send({ type: 'subscribe', channel: 'account' });
+      first.send({ type: 'subscribe', channel: 'positions' });
+      first.clear();
+
+      socket.receive(accountMessage());
+      socket.receive(positionsMessage());
+
+      expect(first.frames.map(({ key }) => key)).toEqual(['account', 'positions']);
+    });
+
+    it('entrega a cotação de um ativo só às abas que o assinaram', () => {
+      const { socket, first, second } = twoTabs();
+      first.send({ type: 'subscribe', channel: 'quote', symbols: ['ALFA3'] });
+      second.send({ type: 'subscribe', channel: 'quote', symbols: ['BETA4'] });
+      first.clear();
+      second.clear();
+
+      socket.receive(quoteMessage('ALFA3'));
+
+      expect(first.frames.map(({ key }) => key)).toEqual(['quote:ALFA3']);
+      expect(second.posts).toEqual([]);
+    });
+
+    it('mantém como objeto as cotações com vários ativos', () => {
+      const { socket, first } = connected();
+      first.send({ type: 'subscribe', channel: 'quote' });
+      first.clear();
+
+      socket.receive({ type: 'quotes', timestamp: 1, data: [quote('ALFA3'), quote('BETA4')] });
+
+      expect(first.frames).toEqual([]);
+      expect(first.messages).toHaveLength(1);
+    });
+
+    it('não entrega frames inválidos', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { socket, first } = connected();
+      first.clear();
+
+      socket.receiveFrame('isto não é json');
+
+      expect(first.posts).toEqual([]);
+      vi.restoreAllMocks();
     });
   });
 

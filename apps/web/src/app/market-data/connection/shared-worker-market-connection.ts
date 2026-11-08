@@ -8,6 +8,9 @@ import type {
   WorkerToTabMessage,
 } from './worker-messages';
 
+/** Sem quadros, como em documento oculto, os frames pendentes são aplicados depois deste tempo. */
+const FRAME_FALLBACK_MS = 100;
+
 /** Lado da aba: fala com o worker pela porta e avisa quando a aba sai. */
 export class SharedWorkerMarketConnection implements MarketConnection {
   private readonly statusSubject = new Subject<ConnectionStatus>();
@@ -18,6 +21,10 @@ export class SharedWorkerMarketConnection implements MarketConnection {
 
   private port: MessagePort | undefined;
   private releaseLock: (() => void) | undefined;
+  private latestFrames = new Map<string, string>();
+  private candleFrames: string[] = [];
+  private animationFrameId: number | undefined;
+  private fallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly onPageHide = (): void => this.detach();
   private readonly onPageShow = (event: PageTransitionEvent): void => {
@@ -29,6 +36,7 @@ export class SharedWorkerMarketConnection implements MarketConnection {
   constructor(
     private readonly url: string,
     private readonly createWorker: () => SharedWorker,
+    private readonly afterFlush: () => void = () => undefined,
   ) {}
 
   open(): void {
@@ -97,14 +105,65 @@ export class SharedWorkerMarketConnection implements MarketConnection {
     }
     this.releaseLock?.();
     this.releaseLock = undefined;
+    this.cancelScheduledFlush();
+    this.latestFrames.clear();
+    this.candleFrames = [];
   }
 
   private receive(data: WorkerToTabMessage): void {
+    if (data.type === 'frame') {
+      this.hold(data.frame, data.key);
+      return;
+    }
+    // Mantém a ordem de chegada: o que veio antes de uma mensagem de controle é aplicado antes dela.
+    this.flush();
     if (data.type === 'status') {
       this.statusSubject.next(data.status);
     } else {
       this.messagesSubject.next(data.message);
     }
+  }
+
+  private hold(frame: string, key: string | null): void {
+    if (key === null) {
+      this.candleFrames.push(frame);
+    } else {
+      this.latestFrames.set(key, frame);
+    }
+    if (this.fallbackTimer === undefined) {
+      this.fallbackTimer = setTimeout(() => this.flush(), FRAME_FALLBACK_MS);
+      this.animationFrameId = requestAnimationFrame(() => {
+        this.flush();
+        this.afterFlush();
+      });
+    }
+  }
+
+  private cancelScheduledFlush(): void {
+    if (this.fallbackTimer !== undefined) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = undefined;
+    }
+    if (this.animationFrameId !== undefined) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = undefined;
+    }
+  }
+
+  /** Só os frames que sobraram chegam a ser parseados. */
+  private flush(): void {
+    this.cancelScheduledFlush();
+    const latest = this.latestFrames;
+    const candles = this.candleFrames;
+    this.latestFrames = new Map();
+    this.candleFrames = [];
+    latest.forEach((frame) => this.publishFrame(frame));
+    candles.forEach((frame) => this.publishFrame(frame));
+  }
+
+  /** O worker já validou o frame. */
+  private publishFrame(frame: string): void {
+    this.messagesSubject.next(JSON.parse(frame) as ServerMessage);
   }
 
   private post(message: TabToWorkerMessage): void {

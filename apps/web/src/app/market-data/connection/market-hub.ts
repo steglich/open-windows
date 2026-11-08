@@ -81,7 +81,7 @@ export class MarketHub {
     if (this.upstream === undefined) {
       this.upstream = new UpstreamSocket(url, {
         onStatus: (status) => this.handleStatus(status),
-        onMessage: (message) => this.handleServerMessage(message),
+        onMessage: (message, frame) => this.handleServerMessage(message, frame),
       });
       this.upstream.connect();
       return;
@@ -189,7 +189,7 @@ export class MarketHub {
     this.tabs.forEach((tab) => tab.port.postMessage({ type: 'status', status }));
   }
 
-  private handleServerMessage(message: ServerMessage): void {
+  private handleServerMessage(message: ServerMessage, frame: string): void {
     switch (message.type) {
       case 'welcome':
         this.lastWelcome = message;
@@ -212,19 +212,19 @@ export class MarketHub {
         }
         break;
       case 'quotes':
-        this.deliverQuotes(message);
+        this.deliverQuotes(message, frame);
         break;
       case 'book':
-        this.deliverToHolders('book', message.data.symbol, message);
+        this.deliverToHolders('book', message.data.symbol, frame, `book:${message.data.symbol}`);
         break;
       case 'candle':
-        this.deliverToHolders('candle', message.data.symbol, message);
+        this.deliverToHolders('candle', message.data.symbol, frame, null);
         break;
       case 'positions':
       case 'account':
         this.tabs.forEach((tab) => {
           if (tab.flags[message.type]) {
-            this.post(tab, message);
+            this.postFrame(tab, frame, message.type);
           }
         });
         break;
@@ -245,16 +245,23 @@ export class MarketHub {
   private deliverToHolders(
     channel: SymbolChannel,
     symbol: string,
-    message: ServerMessage,
+    frame: string,
+    key: string | null,
   ): void {
     this.tabs.forEach((tab) => {
       if (tab.symbols[channel].has(symbol)) {
-        this.post(tab, message);
+        this.postFrame(tab, frame, key);
       }
     });
   }
 
-  private deliverQuotes(message: Extract<ServerMessage, { type: 'quotes' }>): void {
+  private deliverQuotes(message: Extract<ServerMessage, { type: 'quotes' }>, frame: string): void {
+    if (message.data.length === 1) {
+      const { symbol } = message.data[0];
+      this.deliverToHolders('quote', symbol, frame, `quote:${symbol}`);
+      return;
+    }
+    // Com vários ativos, o conteúdo pode mudar por aba, então o frame original não serve.
     this.tabs.forEach((tab) => {
       const data = message.data.filter((quote) => tab.symbols.quote.has(quote.symbol));
       if (data.length > 0) {
@@ -278,5 +285,9 @@ export class MarketHub {
 
   private post(tab: Tab, message: ServerMessage): void {
     tab.port.postMessage({ type: 'message', message });
+  }
+
+  private postFrame(tab: Tab, frame: string, key: string | null): void {
+    tab.port.postMessage({ type: 'frame', frame, key });
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { ApplicationRef, inject, Injectable } from '@angular/core';
 import { NEVER, Observable, of } from 'rxjs';
 
 import type { ClientMessage, ServerMessage } from '../market-protocol';
@@ -26,6 +26,8 @@ export class UnavailableMarketConnection implements MarketConnection {
 
 @Injectable({ providedIn: 'root' })
 export class BrowserMarketConnectionFactory {
+  private readonly appRef = inject(ApplicationRef);
+
   create(url: string): MarketConnection {
     if (typeof SharedWorker === 'undefined') {
       return new UnavailableMarketConnection();
@@ -34,6 +36,8 @@ export class BrowserMarketConnectionFactory {
       url,
       // O builder só empacota o worker quando a expressão é escrita nesta forma.
       () => new SharedWorker(new URL('./market.worker', import.meta.url), { type: 'module' }),
+      // Dentro do `requestAnimationFrame`, o agendador do Angular só renderizaria após a pintura.
+      () => this.appRef.tick(),
     );
   }
 }

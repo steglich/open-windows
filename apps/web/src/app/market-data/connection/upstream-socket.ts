@@ -3,7 +3,8 @@ import type { ConnectionStatus } from './worker-messages';
 
 export interface UpstreamListener {
   onStatus(status: ConnectionStatus): void;
-  onMessage(message: ServerMessage): void;
+  /** `frame` é o texto original recebido do servidor. */
+  onMessage(message: ServerMessage, frame: string): void;
 }
 
 const INITIAL_RETRY_DELAY_MS = 1000;
@@ -108,7 +109,8 @@ export class UpstreamSocket {
       this.listener.onStatus('connected');
       this.startSilenceCheck();
     }
-    this.listener.onMessage(message);
+    // `parseServerMessage` só aceita strings.
+    this.listener.onMessage(message, frame as string);
   }
 
   private startSilenceCheck(): void {

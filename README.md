@@ -75,11 +75,13 @@ Servidor ──WebSocket──▶ SharedWorker ──postMessage──▶ Market
                          parse e roteamento)           ou janela)                 ou janela)
 ```
 
-**Uma conexão por origem.** O WebSocket, o `JSON.parse`, a validação, a reconexão e a detecção de silêncio rodam em um SharedWorker. Todas as abas e janelas da origem compartilham a mesma conexão.
+**Uma conexão por origem.** O WebSocket, a validação, o roteamento, a reconexão e a detecção de silêncio rodam em um SharedWorker. Todas as abas e janelas da origem compartilham a mesma conexão. O worker repassa o texto original de cada frame de dados, pois copiar uma string custa menos que recriar o objeto na aba.
 
 **Cada documento recebe só o que usa.** O worker soma as assinaturas e entrega a cada documento apenas os ativos e canais que ele assinou. Uma assinatura só é cancelada no servidor quando nenhum documento a usa. Cada painel declara os dados que lê em `PANELS[].feeds`, e `MarketStore.syncSubscriptions` é o único ponto que assina ou cancela. Quando um painel sai de um documento, os dados dele são descartados ali.
 
-**Cada mensagem é aplicada na chegada.** O `MarketStore` grava cada mensagem nos signals assim que ela chega, sem buffer nem limitador de tempo. Entre o socket e o store as mensagens passam por um `Subject` do RxJS, porque um signal perderia todas as mensagens de uma rajada, exceto a última. O Angular, sem `zone.js`, agrupa as mudanças até a próxima renderização, e o navegador pinta na taxa do monitor.
+**As mensagens são aplicadas por quadro.** A aba guarda os frames e só os parseia no próximo `requestAnimationFrame`, sem esperar além de um quadro. Entre dois quadros vale apenas o frame mais recente de cada canal e ativo, porque o navegador não exibiria os anteriores. O canal `candle` é a exceção: todas as mensagens são aplicadas, na ordem de chegada. Em documento oculto, onde não há quadros, um temporizador aplica os frames pendentes.
+
+Mensagens de controle, como `welcome`, `error`, respostas de consultas e mudanças de estado da conexão, não esperam o quadro e fazem os frames pendentes serem aplicados antes delas. Entre a conexão e o store as mensagens passam por um `Subject` do RxJS, porque um signal perderia todas as mensagens de um mesmo quadro, exceto a última.
 
 **O trabalho desnecessário é evitado onde não muda o que aparece na tela:**
 
@@ -91,8 +93,8 @@ Servidor ──WebSocket──▶ SharedWorker ──postMessage──▶ Market
 
 ### Limites conhecidos
 
-- As medições feitas na thread principal, durante 30 s, mostraram ganho modesto com o SharedWorker: 2,6% menos tempo de tarefas com uma aba e 11,3% com duas. Com uma aba, o tempo de script subiu 6,1%, porque a desserialização do `postMessage` custa mais que o `JSON.parse` que saiu da thread principal.
-- O maior custo restante é layout e renderização. As 500 linhas de cotações e as 300 de carteira ficam todas no DOM, sem virtualização.
+- O envio do frame original e a aplicação por quadro reduziram o tempo de script da thread principal em 39,4% com uma aba e 54,8% com duas. O tempo total de tarefas caiu 11,5% e 22,6%, respectivamente.
+- O maior custo restante é layout e renderização, que quase não mudaram. As 500 linhas de cotações e as 300 de carteira ficam todas no DOM, sem virtualização.
 - A taxa é por conexão. Se documentos selecionarem ativos diferentes, cada ativo fica com uma fração dos 1000 books e 350 candles por segundo.
 - Em um rodízio com 500 ativos, a cotação do ativo selecionado pode atrasar até 1 s em relação ao book e ao candle.
 
